@@ -68,6 +68,30 @@ func TestModelFuzzySearchMatchesAbbreviatedServiceName(t *testing.T) {
 	}
 }
 
+func TestModelNumberShortcutSelectsVisibleService(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{
+		{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}},
+		{Device: "netbox-01", Name: "sshd", IPs: []string{"192.0.2.20"}, Ports: []int{22}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector.filter.SetValue("netbox")
+	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	selector = updated.(model)
+	if selector.selection == nil || selector.selection.Service.TargetName() != "netbox-01" {
+		t.Fatalf("selection = %#v", selector.selection)
+	}
+	if command == nil {
+		t.Fatal("number shortcut does not quit")
+	}
+	updated, command = selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("9")})
+	selector = updated.(model)
+	if selector.selection == nil || selector.selection.Service.TargetName() != "netbox-01" || command != nil {
+		t.Fatalf("out-of-range shortcut changed selection = %#v", selector.selection)
+	}
+}
+
 func TestModelViewShowsCompactAlignedColumnsAndSelectedDetails(t *testing.T) {
 	selector, err := newModel(context.Background(), []netbox.Service{
 		{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}, Role: "Router", Tenant: "Operations", Status: "active"},
@@ -77,6 +101,9 @@ func TestModelViewShowsCompactAlignedColumnsAndSelectedDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := selector.View()
+	if !strings.Contains(view, "> 1 router-01") || !strings.Contains(view, "  2 application-server-very-long") {
+		t.Fatalf("view does not show numbered rows: %q", view)
+	}
 	header := rowLine(t, view, "TARGET")
 	shortRow := rowLine(t, view, "router-01")
 	longRow := rowLine(t, view, "application-server-very-long")

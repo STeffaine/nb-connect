@@ -142,6 +142,16 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return model, command
 		}
 
+		if shortcutIndex, ok := numberShortcut(message.String()); ok {
+			visible := model.visibleChoices()
+			if shortcutIndex < len(visible) {
+				selection := visible[shortcutIndex]
+				model.selection = &selection
+				return model, tea.Quit
+			}
+			return model, nil
+		}
+
 		switch message.String() {
 		case "ctrl+c", "esc", "q":
 			model.cancelled = true
@@ -209,14 +219,18 @@ func (model model) View() string {
 		output.WriteString("No matching services\n")
 	} else {
 		widths := model.columnWidths()
-		output.WriteString(headingStyle.Render(fmt.Sprintf("  %-*s %-*s %s", widths[0], "TARGET", widths[1], "SERVICE", "ENDPOINT")))
+		output.WriteString(headingStyle.Render(fmt.Sprintf("    %-*s %-*s %s", widths[0], "TARGET", widths[1], "SERVICE", "ENDPOINT")))
 		output.WriteString("\n")
 		for index, selection := range visible {
 			prefix := "  "
 			if index == model.cursor {
 				prefix = "> "
 			}
-			row := fmt.Sprintf("%s%-*s %-*s %s", prefix, widths[0], selection.Service.TargetName(), widths[1], selection.Service.Name, selection.Endpoint)
+			shortcut := "  "
+			if index < 9 {
+				shortcut = fmt.Sprintf("%d ", index+1)
+			}
+			row := fmt.Sprintf("%s%s%-*s %-*s %s", prefix, shortcut, widths[0], selection.Service.TargetName(), widths[1], selection.Service.Name, selection.Endpoint)
 			if index == model.cursor {
 				row = selectedRowStyle.Render(row)
 			}
@@ -228,9 +242,16 @@ func (model model) View() string {
 	if model.searching {
 		output.WriteString("\nEnter apply | Esc clear and return\n")
 	} else {
-		output.WriteString("\nEnter connect | f search | s sync | j/k or arrows move | Esc cancel\n")
+		output.WriteString("\n1-9 connect | Enter connect | f search | s sync | j/k or arrows move | Esc cancel\n")
 	}
 	return output.String()
+}
+
+func numberShortcut(key string) (int, bool) {
+	if len(key) != 1 || key[0] < '1' || key[0] > '9' {
+		return 0, false
+	}
+	return int(key[0] - '1'), true
 }
 
 func (model model) columnWidths() [2]int {

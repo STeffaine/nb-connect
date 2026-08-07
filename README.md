@@ -23,7 +23,7 @@ Use `--config`, `--credentials`, and `--cache` to override the default paths, wh
 
 ## Connecting
 
-The plain command opens a built-in terminal selector over cached services. No additional host package is required. Press `f` to search, `s` to synchronize from NetBox, use arrows or `j`/`k` to move, Enter to connect, and Esc to cancel.
+The plain command opens a built-in terminal selector over cached services. No additional host package is required. Press `1` through `9` to connect to a numbered result, `f` to search, `s` to synchronize from NetBox, use arrows or `j`/`k` to move, Enter to connect, and Esc to cancel.
 
 ```sh
 nbcon
@@ -36,7 +36,7 @@ Use explicit selectors for scripts:
 nbcon connect --target router-01 --service sshd
 ```
 
-`ssh` and `sshd` services are currently supported. The command uses `ssh.default_user` and the service endpoint from NetBox, then executes the local `ssh` client. Local SSH configuration remains responsible for keys, host aliases, and additional options.
+`ssh`, `sshd`, and `telnet` services are currently supported. SSH uses `ssh.default_user` and the service endpoint from NetBox, then executes the local `ssh` client. Local SSH configuration remains responsible for keys, host aliases, and additional options. Telnet services execute the local `telnet` client as `telnet <host> <port>` and do not use SSH configuration.
 
 To assign a private key to a user, add it under `ssh.keys`:
 
@@ -50,11 +50,12 @@ ssh:
 
 `nbcon` expands `~/...` and passes the configured key to `ssh -i` for the matching user.
 
-Use `--dry-run` to print the SSH invocation without opening a session. Services with more than one endpoint require an explicit endpoint.
+Use `--dry-run` to print the connection invocation without opening a session. Services with more than one endpoint require an explicit endpoint.
 
 ```sh
 nbcon connect --target router-01 --service sshd --dry-run
 nbcon connect --target router-01 --service sshd --endpoint 192.0.2.10:22
+nbcon connect --target switch-01 --service telnet --dry-run
 ```
 
 Use `--refresh` to synchronize with NetBox before reading the cache:
