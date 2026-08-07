@@ -19,18 +19,9 @@ mkdir -p ~/.config/nb-connect
 install -m 0644 config.example.yaml ~/.config/nb-connect/config.yaml
 install -m 0600 credentials.example.yaml ~/.config/nb-connect/credentials.yaml
 ```
+To install in `/usr/bin` instead, replace the destination in the `install` command with `/usr/bin/nbcon`. On a system where you do not have administrator access, install it in your local bin directory:
 
 Edit `~/.config/nb-connect/config.yaml` and `~/.config/nb-connect/credentials.yaml` before running `nbcon sync`.
-
-Build `nbcon` with Go 1.24 or newer, then install it in `/usr/local/bin`, which is normally available on the system `PATH`:
-
-```sh
-go build -o nbcon ./cmd/nbcon
-sudo install -m 0755 nbcon /usr/local/bin/nbcon
-command -v nbcon
-```
-
-To install in `/usr/bin` instead, replace the destination in the `install` command with `/usr/bin/nbcon`. On a system where you do not have administrator access, install it in your local bin directory:
 
 ```sh
 mkdir -p ~/.local/bin
@@ -38,7 +29,7 @@ install -m 0755 nbcon ~/.local/bin/nbcon
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Add the `PATH` export to your shell profile when `~/.local/bin` is not already on `PATH`. Or put it where ever you want, it doesnt really matter.
+Add the `PATH` export to your shell profile when `~/.local/bin` is not already on `PATH`.
 
 ### Multiple NetBox servers
 
@@ -77,12 +68,7 @@ The selector and `list` command work from the local cache, so they remain usable
 
 ## Connecting
 
-The plain command opens a built-in terminal selector over cached services. No additional host package is required. Press `1` through `9` to connect to a numbered result, `f` to search, `s` to synchronize from NetBox, use arrows or `j`/`k` to move, Enter to connect, and Esc to cancel.
-
-```sh
-nbcon
-nbcon connect
-```
+The plain `nbcon` command opens a built-in terminal selector over cached services. No additional host package is required. Press `1` through `9` to connect to a numbered result, `f` to search, `s` to synchronize from NetBox, use arrows or `j`/`k` to move, Enter to connect, and Esc to cancel.
 
 Use explicit selectors for scripts:
 
@@ -135,7 +121,7 @@ ping:
 Use `sync --debug-api` to write each NetBox request URL, response status, and raw response body to standard error. Authorization headers and tokens are never printed.
 
 ```sh
-go run ./cmd/nbcon sync --debug-api
+nbcon sync --debug-api
 ```
 
 Raw API responses may contain infrastructure names and addresses. Use this option only in a trusted terminal and do not paste its output into public channels.
