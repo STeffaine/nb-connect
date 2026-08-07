@@ -2,9 +2,14 @@ package launcher
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -58,17 +63,28 @@ type model struct {
 	cursor    int
 	searching bool
 	syncing   bool
+	pinging   bool
 	syncError string
 	syncNote  string
+	pingNote  string
 	context   context.Context
 	sync      SyncServices
+	ping      func(context.Context, string) (string, error)
 	selection *Selection
 	cancelled bool
+	favorites map[string]bool
+	recents   []string
+	statePath string
 }
 
 type syncResult struct {
 	services []netbox.Service
 	err      error
+}
+
+type pingResult struct {
+	output string
+	err    error
 }
 
 func newModel(ctx context.Context, services []netbox.Service, syncServices SyncServices) (model, error) {
@@ -78,7 +94,13 @@ func newModel(ctx context.Context, services []netbox.Service, syncServices SyncS
 	}
 	filter := textinput.New()
 	filter.Prompt = "Search: "
-	return model{choices: choices, context: ctx, filter: filter, sync: syncServices}, nil
+	statePath := defaultLauncherStatePath()
+	favorites, recents, err := loadLauncherState(statePath)
+	if err != nil {
+		favorites = map[string]bool{}
+		recents = nil
+	}
+	return model{choices: choices, context: ctx, filter: filter, sync: syncServices, ping: runPing, favorites: favorites, recents: recents, statePath: statePath}, nil
 }
 
 func choicesForServices(services []netbox.Service) ([]Selection, error) {
@@ -100,6 +122,17 @@ func (model model) Init() tea.Cmd {
 
 func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
+	case pingResult:
+		model.pinging = false
+		if message.err != nil {
+			model.pingNote = fmt.Sprintf("Ping failed: %s", strings.TrimSpace(message.output))
+			if model.pingNote == "Ping failed:" {
+				model.pingNote = fmt.Sprintf("Ping failed: %v", message.err)
+			}
+			return model, nil
+		}
+		model.pingNote = strings.TrimSpace(message.output)
+		return model, nil
 	case syncResult:
 		model.syncing = false
 		if message.err != nil {
@@ -147,6 +180,7 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if shortcutIndex < len(visible) {
 				selection := visible[shortcutIndex]
 				model.selection = &selection
+				model = model.recordSelection(selection)
 				return model, tea.Quit
 			}
 			return model, nil
@@ -179,8 +213,38 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if len(visible) > 0 {
 				selection := visible[model.cursor]
 				model.selection = &selection
+				model = model.recordSelection(selection)
 				return model, tea.Quit
 			}
+		case "m":
+			visible := model.visibleChoices()
+			if len(visible) > 0 {
+				selection := visible[model.cursor]
+				model = model.toggleFavorite(selection)
+			}
+			return model, nil
+		case "p":
+			visible := model.visibleChoices()
+			if len(visible) > 0 && !model.pinging {
+				selection := visible[model.cursor]
+				model.pinging = true
+				model.pingNote = ""
+				return model, func() tea.Msg {
+					output, err := model.ping(model.context, selection.Endpoint)
+					return pingResult{output: output, err: err}
+				}
+			}
+			return model, nil
+		case "l":
+			if len(model.recents) > 0 {
+				selection, ok := model.selectionForKey(model.recents[0])
+				if ok {
+					model.selection = &selection
+					model = model.recordSelection(selection)
+					return model, tea.Quit
+				}
+			}
+			return model, nil
 		case "up", "k":
 			if model.cursor > 0 {
 				model.cursor--
@@ -210,18 +274,32 @@ func (model model) View() string {
 	visible := model.visibleChoices()
 	if model.syncing {
 		output.WriteString("Syncing services from NetBox...\n\n")
+	} else if model.pinging {
+		output.WriteString("Pinging selected endpoint...\n\n")
 	} else if model.syncError != "" {
 		fmt.Fprintf(&output, "Sync failed: %s\n\n", model.syncError)
 	} else if model.syncNote != "" {
 		fmt.Fprintf(&output, "%s\n\n", model.syncNote)
+	} else if model.pingNote != "" {
+		fmt.Fprintf(&output, "Ping:\n%s\n\n", model.pingNote)
 	}
 	if len(visible) == 0 {
 		output.WriteString("No matching services\n")
 	} else {
 		widths := model.columnWidths()
-		output.WriteString(headingStyle.Render(fmt.Sprintf("    %-*s %-*s %s", widths[0], "TARGET", widths[1], "SERVICE", "ENDPOINT")))
+		output.WriteString(headingStyle.Render(fmt.Sprintf("      %-*s %-*s %s", widths[0], "TARGET", widths[1], "SERVICE", "ENDPOINT")))
 		output.WriteString("\n")
+		lastPriority := -1
 		for index, selection := range visible {
+			priority := model.priorityFor(selection)
+			if priority != lastPriority {
+				if lastPriority != -1 {
+					output.WriteString("\n")
+				}
+				output.WriteString(sectionHeading(priority))
+				output.WriteString("\n")
+				lastPriority = priority
+			}
 			prefix := "  "
 			if index == model.cursor {
 				prefix = "> "
@@ -230,7 +308,11 @@ func (model model) View() string {
 			if index < 9 {
 				shortcut = fmt.Sprintf("%d ", index+1)
 			}
-			row := fmt.Sprintf("%s%s%-*s %-*s %s", prefix, shortcut, widths[0], selection.Service.TargetName(), widths[1], selection.Service.Name, selection.Endpoint)
+			favorite := " "
+			if model.favorites[selectionKey(selection)] {
+				favorite = "*"
+			}
+			row := fmt.Sprintf("%s%s%s %-*s %-*s %s", prefix, shortcut, favorite, widths[0], selection.Service.TargetName(), widths[1], selection.Service.Name, selection.Endpoint)
 			if index == model.cursor {
 				row = selectedRowStyle.Render(row)
 			}
@@ -242,7 +324,7 @@ func (model model) View() string {
 	if model.searching {
 		output.WriteString("\nEnter apply | Esc clear and return\n")
 	} else {
-		output.WriteString("\n1-9 connect | Enter connect | f search | s sync | j/k or arrows move | Esc cancel\n")
+		output.WriteString("\n1-9 connect | Enter connect | m favorite | l last used | p ping | f search | s sync | j/k or arrows move | Esc cancel\n")
 	}
 	return output.String()
 }
@@ -252,6 +334,15 @@ func numberShortcut(key string) (int, bool) {
 		return 0, false
 	}
 	return int(key[0] - '1'), true
+}
+
+func runPing(ctx context.Context, endpoint string) (string, error) {
+	host, port, err := net.SplitHostPort(endpoint)
+	if err != nil || strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
+		return "", fmt.Errorf("invalid endpoint %q", endpoint)
+	}
+	output, err := exec.CommandContext(ctx, "ping", "-c", "4", host).CombinedOutput()
+	return string(output), err
 }
 
 func (model model) columnWidths() [2]int {
@@ -267,7 +358,11 @@ func (model model) columnWidths() [2]int {
 
 func (model model) writeSelectionDetails(output *strings.Builder, selection Selection) {
 	service := selection.Service
-	fmt.Fprintf(output, "\nDetails: role: %s | tenant: %s | status: %s\n", valueOrUnknown(service.Role), valueOrUnknown(service.Tenant), statusStyle(service.Status).Render(valueOrUnknown(service.Status)))
+	favorite := "no"
+	if model.favorites[selectionKey(selection)] {
+		favorite = "yes"
+	}
+	fmt.Fprintf(output, "\nDetails: favorite: %s | role: %s | tenant: %s | status: %s\n", favorite, valueOrUnknown(service.Role), valueOrUnknown(service.Tenant), statusStyle(service.Status).Render(valueOrUnknown(service.Status)))
 }
 
 func statusStyle(status string) lipgloss.Style {
@@ -292,18 +387,200 @@ func valueOrUnknown(value string) string {
 
 func (model model) visibleChoices() []Selection {
 	query := strings.ToLower(strings.TrimSpace(model.filter.Value()))
-	if query == "" {
-		return model.choices
-	}
-	candidates := make([]string, 0, len(model.choices))
+	choices := make([]Selection, 0, len(model.choices))
 	for _, selection := range model.choices {
 		fields := []string{selection.Service.TargetName(), selection.Service.Name, selection.Endpoint, selection.Service.Role, selection.Service.Tenant, selection.Service.Status}
-		candidates = append(candidates, strings.ToLower(strings.Join(fields, " ")))
+		candidate := strings.ToLower(strings.Join(fields, " "))
+		matches := fuzzy.Find(query, []string{candidate})
+		if query == "" || strings.Contains(candidate, query) || len(matches) > 0 {
+			choices = append(choices, selection)
+		}
 	}
-	matches := fuzzy.Find(query, candidates)
-	visible := make([]Selection, 0, len(matches))
-	for _, match := range matches {
-		visible = append(visible, model.choices[match.Index])
+	if len(choices) == 0 {
+		return nil
 	}
-	return visible
+	sort.SliceStable(choices, func(i, j int) bool {
+		left := choices[i]
+		right := choices[j]
+		leftPriority := model.priorityFor(left)
+		rightPriority := model.priorityFor(right)
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		return model.choiceIndex(left) < model.choiceIndex(right)
+	})
+	return choices
+}
+
+func (model model) priorityFor(selection Selection) int {
+	key := selectionKey(selection)
+	switch {
+	case model.favorites[key]:
+		return 0
+	case model.isRecent(key):
+		return 1
+	default:
+		return 2
+	}
+}
+
+func sectionHeading(priority int) string {
+	switch priority {
+	case 0:
+		return "Favorites"
+	case 1:
+		return "Recents"
+	default:
+		return "Services"
+	}
+}
+
+func (model model) choiceIndex(selection Selection) int {
+	for index, candidate := range model.choices {
+		if selectionKey(candidate) == selectionKey(selection) {
+			return index
+		}
+	}
+	return len(model.choices)
+}
+
+func (model model) favoriteSelections() []Selection {
+	var favorites []Selection
+	for _, selection := range model.choices {
+		if model.favorites[selectionKey(selection)] {
+			favorites = append(favorites, selection)
+		}
+	}
+	return favorites
+}
+
+func (model model) selectionForKey(key string) (Selection, bool) {
+	for _, selection := range model.choices {
+		if selectionKey(selection) == key {
+			return selection, true
+		}
+	}
+	return Selection{}, false
+}
+
+func (model model) recentSelections() []Selection {
+	var selections []Selection
+	for _, key := range model.recents {
+		for _, selection := range model.choices {
+			if selectionKey(selection) == key {
+				selections = append(selections, selection)
+				break
+			}
+		}
+	}
+	return selections
+}
+
+func (model model) isRecent(key string) bool {
+	for _, recent := range model.recents {
+		if recent == key {
+			return true
+		}
+	}
+	return false
+}
+
+func (model model) recordSelection(selection Selection) model {
+	key := selectionKey(selection)
+	if key == "" {
+		return model
+	}
+	if model.favorites == nil {
+		model.favorites = map[string]bool{}
+	}
+	model.recents = append([]string{key}, model.recents...)
+	seen := make(map[string]struct{}, len(model.recents))
+	filtered := make([]string, 0, len(model.recents))
+	for _, recent := range model.recents {
+		if recent == "" {
+			continue
+		}
+		if _, exists := seen[recent]; exists {
+			continue
+		}
+		seen[recent] = struct{}{}
+		filtered = append(filtered, recent)
+		if len(filtered) == 8 {
+			break
+		}
+	}
+	model.recents = filtered
+	_ = saveLauncherState(model.statePath, model.favorites, model.recents)
+	return model
+}
+
+func (model model) toggleFavorite(selection Selection) model {
+	key := selectionKey(selection)
+	if key == "" {
+		return model
+	}
+	if model.favorites == nil {
+		model.favorites = map[string]bool{}
+	}
+	if model.favorites[key] {
+		delete(model.favorites, key)
+	} else {
+		model.favorites[key] = true
+	}
+	_ = saveLauncherState(model.statePath, model.favorites, model.recents)
+	return model
+}
+
+func selectionKey(selection Selection) string {
+	parts := []string{strings.ToLower(strings.TrimSpace(selection.Service.TargetName())), strings.ToLower(strings.TrimSpace(selection.Service.Name)), strings.ToLower(strings.TrimSpace(selection.Endpoint))}
+	return strings.Join(parts, "::")
+}
+
+func defaultLauncherStatePath() string {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(cacheDir, "nb-connect", "launcher-state.json")
+}
+
+func loadLauncherState(path string) (map[string]bool, []string, error) {
+	if strings.TrimSpace(path) == "" {
+		return map[string]bool{}, nil, nil
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return map[string]bool{}, nil, nil
+		}
+		return nil, nil, err
+	}
+	var state struct {
+		Favorites map[string]bool `json:"favorites"`
+		Recents   []string        `json:"recents"`
+	}
+	if err := json.Unmarshal(contents, &state); err != nil {
+		return nil, nil, err
+	}
+	if state.Favorites == nil {
+		state.Favorites = map[string]bool{}
+	}
+	return state.Favorites, state.Recents, nil
+}
+
+func saveLauncherState(path string, favorites map[string]bool, recents []string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	contents, err := json.MarshalIndent(struct {
+		Favorites map[string]bool `json:"favorites"`
+		Recents   []string        `json:"recents"`
+	}{Favorites: favorites, Recents: recents}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, contents, 0o600)
 }

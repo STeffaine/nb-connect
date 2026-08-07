@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -101,7 +102,7 @@ func TestModelViewShowsCompactAlignedColumnsAndSelectedDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := selector.View()
-	if !strings.Contains(view, "> 1 router-01") || !strings.Contains(view, "  2 application-server-very-long") {
+	if !strings.Contains(view, "> 1   router-01") || !strings.Contains(view, "  2   application-server-very-long") {
 		t.Fatalf("view does not show numbered rows: %q", view)
 	}
 	header := rowLine(t, view, "TARGET")
@@ -124,12 +125,12 @@ func TestModelViewShowsCompactAlignedColumnsAndSelectedDetails(t *testing.T) {
 			t.Fatalf("header unexpectedly contains %q: %q", unwanted, header)
 		}
 	}
-	if !strings.Contains(view, "Details: role: Router | tenant: Operations | status: active") {
+	if !strings.Contains(view, "Details: favorite: no | role: Router | tenant: Operations | status: active") {
 		t.Fatalf("view does not show selected details: %q", view)
 	}
 	updated, _ := selector.Update(tea.KeyMsg{Type: tea.KeyDown})
 	selector = updated.(model)
-	if view = selector.View(); !strings.Contains(view, "Details: role: Application | tenant: Platform | status: planned") {
+	if view = selector.View(); !strings.Contains(view, "Details: favorite: no | role: Application | tenant: Platform | status: planned") {
 		t.Fatalf("view does not update selected details: %q", view)
 	}
 }
@@ -147,6 +148,87 @@ func TestStatusStyleUsesSemanticColors(t *testing.T) {
 		if got := statusStyle(test.status).GetForeground(); got != test.color {
 			t.Errorf("statusStyle(%q) foreground = %#v, want %#v", test.status, got, test.color)
 		}
+	}
+}
+
+func TestModelNavigatesToRecentsAndSelectsLastUsed(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{
+		{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}},
+		{Device: "db-01", Name: "sshd", IPs: []string{"192.0.2.20"}, Ports: []int{22}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector.recents = []string{"db-01::sshd::192.0.2.20:22"}
+	updated, _ := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	selected := updated.(model).selection
+	if selected == nil || selected.Service.TargetName() != "db-01" {
+		t.Fatalf("last used selection = %#v", selected)
+	}
+}
+
+func TestModelPingsSelectedEndpoint(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector.ping = func(_ context.Context, endpoint string) (string, error) {
+		if endpoint != "192.0.2.10:22" {
+			t.Fatalf("ping endpoint = %q", endpoint)
+		}
+		return "PING 192.0.2.10\n", nil
+	}
+	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	selector = updated.(model)
+	if selector.selection != nil || !selector.pinging {
+		t.Fatalf("ping model = %#v", selector)
+	}
+	if command == nil {
+		t.Fatal("ping shortcut does not start")
+	}
+	updated, _ = selector.Update(command())
+	selector = updated.(model)
+	if selector.pinging || !strings.Contains(selector.View(), "PING 192.0.2.10") {
+		t.Fatalf("ping result model = %#v", selector)
+	}
+}
+
+func TestModelPrioritizesFavoritesAndRecentsInView(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{
+		{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}},
+		{Device: "db-01", Name: "sshd", IPs: []string{"192.0.2.20"}, Ports: []int{22}},
+		{Device: "jump-01", Name: "sshd", IPs: []string{"192.0.2.30"}, Ports: []int{22}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector.favorites = map[string]bool{"db-01::sshd::192.0.2.20:22": true}
+	selector.recents = []string{"jump-01::sshd::192.0.2.30:22"}
+	visible := selector.visibleChoices()
+	if len(visible) != 3 {
+		t.Fatalf("visible choices = %#v", visible)
+	}
+	if got := visible[0].Service.TargetName(); got != "db-01" {
+		t.Fatalf("first visible choice = %q", got)
+	}
+	if got := visible[1].Service.TargetName(); got != "jump-01" {
+		t.Fatalf("second visible choice = %q", got)
+	}
+	if got := visible[2].Service.TargetName(); got != "router-01" {
+		t.Fatalf("third visible choice = %q", got)
+	}
+	view := selector.View()
+	if !strings.Contains(view, "Favorites") || !strings.Contains(view, "Recents") {
+		t.Fatalf("view does not show favorite/recent grouping: %q", view)
+	}
+	if !strings.Contains(view, "* db-01") || !strings.Contains(view, "Details: favorite: yes") {
+		t.Fatalf("view does not mark the favorite: %q", view)
+	}
+	selector.cursor = 2
+	updated, _ := selector.Update(tea.KeyMsg{Type: tea.KeyUp})
+	selector = updated.(model)
+	if got := selector.visibleChoices()[selector.cursor].Service.TargetName(); got != "jump-01" {
+		t.Fatalf("up navigation selected %q, want recent jump-01", got)
 	}
 }
 

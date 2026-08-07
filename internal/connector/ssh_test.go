@@ -27,3 +27,4 @@ func TestSSHRejectsUnsupportedOrAmbiguousServices(t *testing.T) {
 		t.Fatal("SSH() error = nil for ambiguous endpoint")
 	}
 }
+
