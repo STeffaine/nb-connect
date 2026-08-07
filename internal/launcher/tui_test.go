@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -307,6 +308,45 @@ func TestModelSyncRefreshesChoices(t *testing.T) {
 	}
 	if !strings.Contains(selector.View(), "Synced 1 services") {
 		t.Fatalf("view does not show sync confirmation: %q", selector.View())
+	}
+}
+
+func TestModelSyncReportsUnavailableAndFailedSync(t *testing.T) {
+	services := []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}
+	selector, err := newModel(context.Background(), services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	selector = updated.(model)
+	if command != nil || selector.syncing || selector.syncError != "sync is unavailable" {
+		t.Fatalf("unavailable sync = %#v, command=%v", selector, command)
+	}
+
+	selector.sync = func(context.Context) ([]netbox.Service, error) {
+		return nil, errors.New("NetBox unavailable")
+	}
+	updated, command = selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	selector = updated.(model)
+	if !selector.syncing || command == nil {
+		t.Fatalf("failed sync does not start = %#v, command=%v", selector, command)
+	}
+	updated, _ = selector.Update(command())
+	selector = updated.(model)
+	if selector.syncing || selector.syncError != "NetBox unavailable" {
+		t.Fatalf("failed sync result = %#v", selector)
+	}
+}
+
+func TestModelCancelsFromBrowseMode(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	selector = updated.(model)
+	if !selector.cancelled || command == nil {
+		t.Fatalf("browse cancellation = %#v, command=%v", selector, command)
 	}
 }
 

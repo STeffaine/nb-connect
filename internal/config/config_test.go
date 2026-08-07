@@ -49,6 +49,19 @@ func TestLoadUsesDefaultTTL(t *testing.T) {
 	}
 }
 
+func TestLoadExpandsSSHIdentityHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := writeFile(t, "config.yaml", "netbox:\n  url: https://netbox.example.test\nssh:\n  keys:\n    ops:\n      identity_file: ~/.ssh/id_ops\n")
+	configuration, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := configuration.SSH.Keys["ops"].IdentityFile, filepath.Join(home, ".ssh", "id_ops"); got != want {
+		t.Fatalf("identity file = %q, want %q", got, want)
+	}
+}
+
 func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 	testCases := []struct {
 		name     string

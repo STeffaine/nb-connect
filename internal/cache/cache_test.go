@@ -42,6 +42,13 @@ func TestStoreReadRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestStoreReadReportsMissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing", "services.json")
+	if _, err := (Store{Path: path}).Read(); err == nil {
+		t.Fatal("Read() error = nil")
+	}
+}
+
 func TestDefaultPath(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheRoot)

@@ -3,6 +3,7 @@ package netbox
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,4 +99,81 @@ func TestValidateWritesAPIDebugTraceWithoutAuthorizationHeader(t *testing.T) {
 	if got := trace.String(); !strings.Contains(got, "GET "+server.URL+"/api/status/") || !strings.Contains(got, `{"netbox-version":"4.6"}`) || strings.Contains(got, "nbt_example") {
 		t.Fatalf("unexpected trace: %q", got)
 	}
+}
+
+func TestNewClientRejectsRelativeURL(t *testing.T) {
+	if _, err := NewClient("/api", "example", nil); err == nil {
+		t.Fatal("NewClient() error = nil")
+	}
+}
+
+func TestServicesReportsHTTPAndDecodeFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		code int
+		want string
+	}{
+		{name: "HTTP status", code: http.StatusInternalServerError, body: "unavailable", want: "unexpected status"},
+		{name: "invalid JSON", code: http.StatusOK, body: "{", want: "decode NetBox services"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				response.WriteHeader(test.code)
+				_, _ = response.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			client, err := NewClient(server.URL, "example", server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Services(context.Background())
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Services() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestServicesCachesParentMetadata(t *testing.T) {
+	parentRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/dcim/devices/1/" {
+			parentRequests++
+			_, _ = response.Write([]byte(`{"role":{"name":"Router"}}`))
+			return
+		}
+		_, _ = response.Write([]byte(`{"next":null,"results":[{"name":"sshd","protocol":"tcp","ports":[22],"ipaddresses":[{"address":"192.0.2.10/32"}],"device":{"name":"router-01","url":"/api/dcim/devices/1/"}},{"name":"https","protocol":"tcp","ports":[443],"ipaddresses":[{"address":"192.0.2.10/32"}],"device":{"name":"router-01","url":"/api/dcim/devices/1/"}}]}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "example", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	services, err := client.Services(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentRequests != 1 || len(services) != 2 || services[0].Role != "Router" || services[1].Role != "Router" {
+		t.Fatalf("parent requests = %d, services = %#v", parentRequests, services)
+	}
+}
+
+func TestValidateWrapsTransportError(t *testing.T) {
+	client, err := NewClient("https://netbox.example.test", "example", &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("network unavailable")
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Validate(context.Background()); err == nil || !strings.Contains(err.Error(), "contact NetBox") {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
 }
