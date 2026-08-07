@@ -322,8 +322,10 @@ func (model model) View() string {
 				if lastPriority != -1 {
 					output.WriteString("\n")
 				}
-				output.WriteString(sectionHeading(priority))
-				output.WriteString("\n")
+				if heading := sectionHeading(priority); heading != "" {
+					output.WriteString(heading)
+					output.WriteString("\n")
+				}
 				lastPriority = priority
 			}
 			prefix := "  "
@@ -542,7 +544,7 @@ func sectionHeading(priority int) string {
 	case 1:
 		return "Recents"
 	default:
-		return "Services"
+		return ""
 	}
 }
 
