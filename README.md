@@ -4,22 +4,41 @@
 
 ## Current scope
 
-`nbcon` synchronizes NetBox application services into a local cache, enriches them with parent target metadata, and launches configured SSH services. It uses the cache by default, so connection selection works offline after a successful sync.
+`nbcon` synchronizes NetBox application services into a local cache, enriches them with parent target metadata, and launches configured SSH and telnet services. It uses the cache by default, so connection selection works offline after a successful sync.
 
-## Setup
+## Installation
 
-Create the public configuration at `~/.config/nb-connect/config.yaml` (or the platform equivalent) from [config.example.yaml](config.example.yaml).
-
-Create `~/.config/nb-connect/credentials.yaml` from [credentials.example.yaml](credentials.example.yaml), replace the placeholder token, and apply restrictive permissions:
+Clone, build, and install `nbcon`, then copy the configuration templates:
 
 ```sh
-cp credentials.example.yaml ~/.config/nb-connect/credentials.yaml
-chmod 600 ~/.config/nb-connect/credentials.yaml
-go run ./cmd/nbcon sync
-go run ./cmd/nbcon list
+git clone https://github.com/STeffaine/nb-connect.git
+cd nb-connect
+go build -o nbcon ./cmd/nbcon
+sudo install -m 0755 nbcon /usr/local/bin/nbcon
+mkdir -p ~/.config/nb-connect
+install -m 0644 config.example.yaml ~/.config/nb-connect/config.yaml
+install -m 0600 credentials.example.yaml ~/.config/nb-connect/credentials.yaml
 ```
 
-Use `--config`, `--credentials`, and `--cache` to override the default paths, which makes automation and testing straightforward.
+Edit `~/.config/nb-connect/config.yaml` and `~/.config/nb-connect/credentials.yaml` before running `nbcon sync`.
+
+Build `nbcon` with Go 1.24 or newer, then install it in `/usr/local/bin`, which is normally available on the system `PATH`:
+
+```sh
+go build -o nbcon ./cmd/nbcon
+sudo install -m 0755 nbcon /usr/local/bin/nbcon
+command -v nbcon
+```
+
+To install in `/usr/bin` instead, replace the destination in the `install` command with `/usr/bin/nbcon`. On a system where you do not have administrator access, install it in your local bin directory:
+
+```sh
+mkdir -p ~/.local/bin
+install -m 0755 nbcon ~/.local/bin/nbcon
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Add the `PATH` export to your shell profile when `~/.local/bin` is not already on `PATH`. Or put it where ever you want, it doesnt really matter.
 
 ### Multiple NetBox servers
 
@@ -46,6 +65,15 @@ netbox:
 ```
 
 The `netbox.servers` mappings are required, including when connecting to only one NetBox instance.
+
+## User Guide
+
+1. Copy the example configuration files as shown above. Set each NetBox server URL, add its matching API token, and choose the service names that `nbcon` should expose in `services.enabled`.
+2. Run `nbcon sync` to validate the configured servers and save their enabled services locally. Repeat this whenever NetBox service data changes.
+3. Run `nbcon` to open the cached service selector. Search with `f`, move with arrow keys or `j`/`k`, select with Enter, and press `p` to ping the selected endpoint. Press Esc to exit without connecting.
+4. For automation, use `nbcon connect --target <target> --service <service>`. Add `--server <name>` when targets are duplicated across NetBox instances, and use `--dry-run` to inspect the local connection command first.
+
+The selector and `list` command work from the local cache, so they remain usable without NetBox access after a successful sync. Use `nbcon connect --refresh` when a connection should synchronize before selecting a service.
 
 ## Connecting
 
@@ -91,6 +119,8 @@ Use `--refresh` to synchronize with NetBox before reading the cache:
 nbcon connect --refresh
 ```
 
+Use `--config`, `--credentials`, and `--cache` to override the default paths, which makes automation and testing straightforward.
+
 ### Ping checks
 
 In the service selector, press `p` to ping the selected endpoint without leaving the TUI. Configure the number of probes with `ping.count`; it defaults to `4`:
@@ -109,19 +139,3 @@ go run ./cmd/nbcon sync --debug-api
 ```
 
 Raw API responses may contain infrastructure names and addresses. Use this option only in a trusted terminal and do not paste its output into public channels.
-
-## Design Decisions
-
-- NetBox is queried through `GET /api/status/` for token validation and `GET /api/ipam/services/` for discovery. The client follows the paginated `results` response and supports modern unified service parents as well as older device/VM fields.
-- The client follows NetBox pagination and preserves the service protocol, ports, IP addresses, device or VM, and tags.
-- Service selection reads the local cache by default; `connect --refresh` explicitly updates it from NetBox.
-- Cache writes are atomic and use restrictive `0600` permissions.
-- Credentials are kept out of public configuration and are never written by the application in this milestone.
-
-## Delivery Plan
-
-1. Core: configuration, credentials, NetBox discovery, and cache. Complete.
-2. Launcher: built-in terminal selector and SSH command construction. Complete.
-3. Reliability: TTL-aware cache refresh and more actionable error handling.
-4. Integration: tmux/WezTerm and SSH configuration generation.
-5. Service expansion: HTTPS and further connector types, jump-host resolution, and Ansible export.
