@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/steffaine/nb-connect/internal/netbox"
 )
@@ -101,7 +100,7 @@ func TestModelViewShowsCompactAlignedColumnsAndSelectedDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view := selector.View()
+	view := stripANSI(selector.View())
 	if !strings.Contains(view, "> 1   router-01") || !strings.Contains(view, "  2   application-server-very-long") {
 		t.Fatalf("view does not show numbered rows: %q", view)
 	}
@@ -130,7 +129,7 @@ func TestModelViewShowsCompactAlignedColumnsAndSelectedDetails(t *testing.T) {
 	}
 	updated, _ := selector.Update(tea.KeyMsg{Type: tea.KeyDown})
 	selector = updated.(model)
-	if view = selector.View(); !strings.Contains(view, "Details: favorite: no | role: Application | tenant: Platform | status: planned") {
+	if view = stripANSI(selector.View()); !strings.Contains(view, "Details: favorite: no | role: Application | tenant: Platform | status: planned") {
 		t.Fatalf("view does not update selected details: %q", view)
 	}
 }
@@ -162,15 +161,15 @@ func TestModelResizesListToTerminalViewport(t *testing.T) {
 func TestStatusStyleUsesSemanticColors(t *testing.T) {
 	tests := []struct {
 		status string
-		color  lipgloss.Color
+		style  string
 	}{
-		{status: "active", color: lipgloss.Color("42")},
-		{status: "planned", color: lipgloss.Color("214")},
-		{status: "offline", color: lipgloss.Color("196")},
+		{status: "active", style: statusActiveStyle},
+		{status: "planned", style: statusPendingStyle},
+		{status: "offline", style: statusProblemStyle},
 	}
 	for _, test := range tests {
-		if got := statusStyle(test.status).GetForeground(); got != test.color {
-			t.Errorf("statusStyle(%q) foreground = %#v, want %#v", test.status, got, test.color)
+		if got := statusStyle(test.status); got != test.style {
+			t.Errorf("statusStyle(%q) = %q, want %q", test.status, got, test.style)
 		}
 	}
 }
@@ -204,15 +203,26 @@ func TestModelPingsSelectedEndpoint(t *testing.T) {
 	if command == nil {
 		t.Fatal("ping shortcut does not start")
 	}
+	viewBeforePingOutput := stripANSI(selector.View())
 	updated, _ = selector.Update(pingMessage{line: "64 bytes from 192.0.2.10"})
 	selector = updated.(model)
-	if !selector.pinging || !strings.Contains(selector.View(), "64 bytes from 192.0.2.10") {
+	viewWithPingOutput := stripANSI(selector.View())
+	if !selector.pinging || !strings.Contains(viewWithPingOutput, "64 bytes from 192.0.2.10") {
 		t.Fatalf("live ping model = %#v", selector)
+	}
+	if !strings.Contains(viewWithPingOutput, "Ping in progress") {
+		t.Fatalf("view does not show ping popup: %q", viewWithPingOutput)
+	}
+	if strings.Index(viewBeforePingOutput, "TARGET") != strings.Index(viewWithPingOutput, "TARGET") {
+		t.Fatalf("ping output moved the service list: before=%q after=%q", viewBeforePingOutput, viewWithPingOutput)
 	}
 	updated, _ = selector.Update(pingMessage{done: true})
 	selector = updated.(model)
 	if selector.pinging {
 		t.Fatalf("completed ping model = %#v", selector)
+	}
+	if view := stripANSI(selector.View()); !strings.Contains(view, "Ping results") {
+		t.Fatalf("view does not retain ping results popup: %q", view)
 	}
 }
 
@@ -255,6 +265,29 @@ func TestModelPrioritizesFavoritesAndRecentsInView(t *testing.T) {
 	}
 }
 
+func TestModelOrdersRecentsByMostRecentSelection(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{
+		{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}},
+		{Device: "db-01", Name: "sshd", IPs: []string{"192.0.2.20"}, Ports: []int{22}},
+		{Device: "jump-01", Name: "sshd", IPs: []string{"192.0.2.30"}, Ports: []int{22}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector.recents = []string{
+		"jump-01::sshd::192.0.2.30:22",
+		"db-01::sshd::192.0.2.20:22",
+	}
+
+	visible := selector.visibleChoices()
+	if got, want := visible[0].Service.TargetName(), "jump-01"; got != want {
+		t.Fatalf("most recent choice = %q, want %q", got, want)
+	}
+	if got, want := visible[1].Service.TargetName(), "db-01"; got != want {
+		t.Fatalf("second most recent choice = %q, want %q", got, want)
+	}
+}
+
 func TestModelSyncRefreshesChoices(t *testing.T) {
 	selector, err := newModel(context.Background(), []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}, func(context.Context) ([]netbox.Service, error) {
 		return []netbox.Service{{Device: "netbox-01", Name: "sshd", IPs: []string{"192.0.2.20"}, Ports: []int{22}}}, nil
@@ -286,4 +319,15 @@ func rowLine(t *testing.T, view, contains string) string {
 	}
 	t.Fatalf("view %q does not contain row %q", view, contains)
 	return ""
+}
+
+func stripANSI(value string) string {
+	return strings.NewReplacer(
+		headingStyle, "",
+		selectedRowStyle, "",
+		statusActiveStyle, "",
+		statusPendingStyle, "",
+		statusProblemStyle, "",
+		ansiReset, "",
+	).Replace(value)
 }
