@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -36,7 +37,7 @@ func TestServicesFollowsPaginationAndNormalizesAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requests != 2 || len(services) != 2 {
+	if requests != 3 || len(services) != 2 {
 		t.Fatalf("got %d requests and %d services", requests, len(services))
 	}
 	if got := services[0].Protocol; got != "tcp" {

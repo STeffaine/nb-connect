@@ -9,21 +9,7 @@ import (
 )
 
 func TestLoad(t *testing.T) {
-	path := writeFile(t, "config.yaml", `
-netbox:
-  url: " https://netbox.example.test/ "
-services:
-  enabled: [sshd, https]
-ssh:
-  default_user: ops
-	keys:
-		ops:
-			identity_file: /home/ops/.ssh/id_ops
-cache:
-  ttl: 30m
-ping:
-	count: 2
-`)
+	path := writeFile(t, "config.yaml", "netbox:\n  url: \" https://netbox.example.test/ \"\nservices:\n  enabled: [sshd, https]\nssh:\n  default_user: ops\n  keys:\n    ops:\n      identity_file: /home/ops/.ssh/id_ops\ncache:\n  ttl: 30m\nping:\n  count: 2\n")
 
 	configuration, err := Load(path)
 	if err != nil {
