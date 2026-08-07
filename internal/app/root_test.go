@@ -14,9 +14,64 @@ import (
 	"time"
 
 	"github.com/steffaine/nb-connect/internal/cache"
+	"github.com/steffaine/nb-connect/internal/config"
 	"github.com/steffaine/nb-connect/internal/launcher"
 	"github.com/steffaine/nb-connect/internal/netbox"
 )
+
+func TestSyncAggregatesMultipleNetBoxServers(t *testing.T) {
+	newServer := func(target string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			switch request.URL.Path {
+			case "/api/status/":
+				writer.WriteHeader(http.StatusOK)
+			case "/api/ipam/services/":
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{"next":null,"results":[{"name":"sshd","protocol":"ssh","ports":[22],"ipaddresses":[{"address":"192.0.2.10/24"}],"device":{"name":"` + target + `"}}]}`))
+			default:
+				t.Errorf("unexpected request path %q", request.URL.Path)
+				writer.WriteHeader(http.StatusNotFound)
+			}
+		}))
+	}
+	production := newServer("production-router")
+	defer production.Close()
+	lab := newServer("lab-router")
+	defer lab.Close()
+
+	credentials := config.Credentials{}
+	credentials.NetBox.Servers = map[string]config.NetBoxServerCredentials{
+		"production": {Token: "production-token"},
+		"lab":        {Token: "lab-token"},
+	}
+	configuration := config.Config{NetBox: config.NetBoxConfig{Servers: []config.NetBoxServer{{Name: "production", URL: production.URL}, {Name: "lab", URL: lab.URL}}}, Services: config.ServicesConfig{Enabled: []string{"sshd"}}}
+	cachePath := filepath.Join(t.TempDir(), "services.json")
+	command := newRootCommand(dependencies{
+		loadConfig:      func(string) (config.Config, error) { return configuration, nil },
+		loadCredentials: func(string) (config.Credentials, error) { return credentials, nil },
+		defaultConfig:   func() (string, error) { return "config.yaml", nil },
+		defaultCache:    func() (string, error) { return cachePath, nil },
+		newClient:       func(url, token string) (*netbox.Client, error) { return netbox.NewClient(url, token, nil) },
+		now:             time.Now,
+	})
+	var output bytes.Buffer
+	command.SetOut(&output)
+	command.SetArgs([]string{"sync"})
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := (cache.Store{Path: cachePath}).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Services) != 2 {
+		t.Fatalf("service count = %d, want 2", len(snapshot.Services))
+	}
+	if snapshot.Services[0].Server != "production" || snapshot.Services[1].Server != "lab" {
+		t.Fatalf("server labels = %#v", snapshot.Services)
+	}
+}
 
 func TestRunListReadsCache(t *testing.T) {
 	cachePath := filepath.Join(t.TempDir(), "services.json")
@@ -54,8 +109,8 @@ func TestRunSyncFetchesAndCachesServices(t *testing.T) {
 	defer server.Close()
 
 	directory := t.TempDir()
-	configPath := writeTestFile(t, directory, "config.yaml", "netbox:\n  url: "+server.URL+"\nservices:\n  enabled:\n    - SSHD\n")
-	credentialsPath := writeTestFile(t, directory, "credentials.yaml", "netbox:\n  token: example-token\n")
+	configPath := writeTestFile(t, directory, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: "+server.URL+"\nservices:\n  enabled:\n    - SSHD\n")
+	credentialsPath := writeTestFile(t, directory, "credentials.yaml", "netbox:\n  servers:\n    production:\n      token: example-token\n")
 	cachePath := filepath.Join(directory, "services.json")
 
 	var output bytes.Buffer
@@ -86,6 +141,16 @@ func TestFilterServices(t *testing.T) {
 	}
 }
 
+func TestFilterServicesByServer(t *testing.T) {
+	services := []netbox.Service{{Server: "production", Device: "router-01"}, {Server: "lab", Device: "router-01"}}
+	if got := filterServicesByServer(services, "LAB"); len(got) != 1 || got[0].Server != "lab" {
+		t.Fatalf("filterServicesByServer() = %#v", got)
+	}
+	if got := filterServicesByServer(services, ""); len(got) != 2 {
+		t.Fatalf("filterServicesByServer() without server = %#v", got)
+	}
+}
+
 func TestRunConnectDryRunBuildsSSHCommand(t *testing.T) {
 	directory := t.TempDir()
 	cachePath := filepath.Join(directory, "services.json")
@@ -93,7 +158,7 @@ func TestRunConnectDryRunBuildsSSHCommand(t *testing.T) {
 	if err := (cache.Store{Path: cachePath}).Write(services, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	configPath := writeTestFile(t, directory, "config.yaml", "netbox:\n  url: https://netbox.example.test\nssh:\n  default_user: ops\n  keys:\n    ops:\n      identity_file: /home/ops/.ssh/id_ops\n")
+	configPath := writeTestFile(t, directory, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: https://netbox.example.test\nssh:\n  default_user: ops\n  keys:\n    ops:\n      identity_file: /home/ops/.ssh/id_ops\n")
 
 	var output bytes.Buffer
 	err := Run(context.Background(), []string{"--config", configPath, "--cache", cachePath, "connect", "--target", "router-01", "--service", "sshd", "--dry-run"}, &output)
@@ -112,7 +177,7 @@ func TestRunConnectDryRunBuildsTelnetCommand(t *testing.T) {
 	if err := (cache.Store{Path: cachePath}).Write(services, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	configPath := writeTestFile(t, directory, "config.yaml", "netbox:\n  url: https://netbox.example.test\n")
+	configPath := writeTestFile(t, directory, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: https://netbox.example.test\n")
 
 	var output bytes.Buffer
 	err := Run(context.Background(), []string{"--config", configPath, "--cache", cachePath, "connect", "--target", "switch-01", "--service", "telnet", "--dry-run"}, &output)

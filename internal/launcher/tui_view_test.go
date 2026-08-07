@@ -1,10 +1,13 @@
 package launcher
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/steffaine/nb-connect/internal/netbox"
 )
 
 func TestSearchInputEditsUnicodeRunes(t *testing.T) {
@@ -26,5 +29,31 @@ func TestPingPopupRespectsTerminalWidth(t *testing.T) {
 		if (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "|")) && len(line) > 16 {
 			t.Fatalf("line exceeds terminal width: %q", line)
 		}
+	}
+}
+
+func TestServiceViewShowsServerColumnOnlyForMultipleServers(t *testing.T) {
+	newSelector := func(services []netbox.Service) model {
+		t.Helper()
+		selector, err := newModel(context.Background(), services, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return selector
+	}
+	productionServices := []netbox.Service{{Server: "production", Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}
+	if view := stripANSI(newSelector(productionServices).View()); strings.Contains(rowLine(t, view, "TARGET"), "SERVER") {
+		t.Fatalf("single-server header contains SERVER: %q", view)
+	}
+
+	services := append(productionServices, netbox.Service{Server: "lab", Device: "router-02", Name: "sshd", IPs: []string{"192.0.2.11"}, Ports: []int{22}})
+	view := stripANSI(newSelector(services).View())
+	header := rowLine(t, view, "TARGET")
+	row := rowLine(t, view, "router-01")
+	if strings.Index(header, "SERVER") < strings.Index(header, "ENDPOINT") {
+		t.Fatalf("server column is not rightmost: %q", header)
+	}
+	if strings.Index(row, "production") < strings.Index(row, "192.0.2.10:22") {
+		t.Fatalf("server value is not rightmost: %q", row)
 	}
 }

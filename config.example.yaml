@@ -2,8 +2,10 @@
 # Copy this file to ~/.config/nb-connect/config.yaml.
 
 netbox:
-  # Base URL of your NetBox instance. Do not include /api/.
-  url: https://netbox.example.com
+  # Add one or more named NetBox servers. Do not include /api/ in URLs.
+  servers:
+    - name: production
+      url: https://netbox.example.com
 
 services:
   # Only these NetBox service names are cached and shown by nbcon.

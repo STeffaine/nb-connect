@@ -21,6 +21,32 @@ go run ./cmd/nbcon list
 
 Use `--config`, `--credentials`, and `--cache` to override the default paths, which makes automation and testing straightforward.
 
+### Multiple NetBox servers
+
+Configure each NetBox instance with a unique name and provide a matching token in the credentials file. `nbcon sync` validates and queries every configured server, then writes their combined services to the local cache. The `list` output includes the server name so duplicate targets are distinguishable.
+
+```yaml
+# config.yaml
+netbox:
+	servers:
+		- name: production
+			url: https://netbox.example.com
+		- name: lab
+			url: https://netbox-lab.example.com
+```
+
+```yaml
+# credentials.yaml
+netbox:
+	servers:
+		production:
+			token: production-token
+		lab:
+			token: lab-token
+```
+
+The `netbox.servers` mappings are required, including when connecting to only one NetBox instance.
+
 ## Connecting
 
 The plain command opens a built-in terminal selector over cached services. No additional host package is required. Press `1` through `9` to connect to a numbered result, `f` to search, `s` to synchronize from NetBox, use arrows or `j`/`k` to move, Enter to connect, and Esc to cancel.
@@ -34,6 +60,7 @@ Use explicit selectors for scripts:
 
 ```sh
 nbcon connect --target router-01 --service sshd
+nbcon connect --server production --target router-01 --service sshd
 ```
 
 `ssh`, `sshd`, and `telnet` services are currently supported. SSH uses `ssh.default_user` and the service endpoint from NetBox, then executes the local `ssh` client. Local SSH configuration remains responsible for keys, host aliases, and additional options. Telnet services execute the local `telnet` client as `telnet <host> <port>` and do not use SSH configuration.

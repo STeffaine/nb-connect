@@ -9,14 +9,14 @@ import (
 )
 
 func TestLoad(t *testing.T) {
-	path := writeFile(t, "config.yaml", "netbox:\n  url: \" https://netbox.example.test/ \"\nservices:\n  enabled: [sshd, https]\nssh:\n  default_user: ops\n  keys:\n    ops:\n      identity_file: /home/ops/.ssh/id_ops\ncache:\n  ttl: 30m\nping:\n  count: 2\n")
+	path := writeFile(t, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: \" https://netbox.example.test/ \"\nservices:\n  enabled: [sshd, https]\nssh:\n  default_user: ops\n  keys:\n    ops:\n      identity_file: /home/ops/.ssh/id_ops\ncache:\n  ttl: 30m\nping:\n  count: 2\n")
 
 	configuration, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if configuration.NetBox.URL != "https://netbox.example.test" {
-		t.Fatalf("NetBox.URL = %q", configuration.NetBox.URL)
+	if got, want := configuration.NetBox.Servers, []NetBoxServer{{Name: "production", URL: "https://netbox.example.test"}}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("Servers = %#v, want %#v", got, want)
 	}
 	if configuration.SSH.DefaultUser != "ops" {
 		t.Fatalf("DefaultUser = %q", configuration.SSH.DefaultUser)
@@ -36,10 +36,13 @@ func TestLoad(t *testing.T) {
 }
 
 func TestLoadUsesDefaultTTL(t *testing.T) {
-	path := writeFile(t, "config.yaml", "netbox:\n  url: http://netbox.example.test\n")
+	path := writeFile(t, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: http://netbox.example.test\n")
 	configuration, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got, want := configuration.NetBox.Servers, []NetBoxServer{{Name: "production", URL: "http://netbox.example.test"}}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("Servers = %#v, want %#v", got, want)
 	}
 	if configuration.Cache.TTL != 15*time.Minute {
 		t.Fatalf("TTL = %s", configuration.Cache.TTL)
@@ -49,10 +52,21 @@ func TestLoadUsesDefaultTTL(t *testing.T) {
 	}
 }
 
+func TestLoadMultipleNetBoxServers(t *testing.T) {
+	path := writeFile(t, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: https://netbox.example.test/\n    - name: lab\n      url: http://netbox.lab.test\n")
+	configuration, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := configuration.NetBox.Servers, []NetBoxServer{{Name: "production", URL: "https://netbox.example.test"}, {Name: "lab", URL: "http://netbox.lab.test"}}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("Servers = %#v, want %#v", got, want)
+	}
+}
+
 func TestLoadExpandsSSHIdentityHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	path := writeFile(t, "config.yaml", "netbox:\n  url: https://netbox.example.test\nssh:\n  keys:\n    ops:\n      identity_file: ~/.ssh/id_ops\n")
+	path := writeFile(t, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: https://netbox.example.test\nssh:\n  keys:\n    ops:\n      identity_file: ~/.ssh/id_ops\n")
 	configuration, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -68,10 +82,10 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		contents string
 		want     string
 	}{
-		{name: "missing URL", contents: "ssh:\n  default_user: ops\n", want: "netbox.url is required"},
-		{name: "invalid URL scheme", contents: "netbox:\n  url: netbox.example.test\n", want: "netbox.url must start"},
-		{name: "invalid TTL", contents: "netbox:\n  url: https://netbox.example.test\ncache:\n  ttl: tomorrow\n", want: "parse cache.ttl"},
-		{name: "invalid ping count", contents: "netbox:\n  url: https://netbox.example.test\nping:\n  count: -1\n", want: "ping.count must be greater than zero"},
+		{name: "missing servers", contents: "ssh:\n  default_user: ops\n", want: "netbox.servers is required"},
+		{name: "invalid URL scheme", contents: "netbox:\n  servers:\n    - name: production\n      url: netbox.example.test\n", want: "netbox.servers[0].url must start"},
+		{name: "invalid TTL", contents: "netbox:\n  servers:\n    - name: production\n      url: https://netbox.example.test\ncache:\n  ttl: tomorrow\n", want: "parse cache.ttl"},
+		{name: "invalid ping count", contents: "netbox:\n  servers:\n    - name: production\n      url: https://netbox.example.test\nping:\n  count: -1\n", want: "ping.count must be greater than zero"},
 		{name: "invalid YAML", contents: "netbox: [\n", want: "parse configuration"},
 	}
 
@@ -85,21 +99,49 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsLegacyNetBoxURL(t *testing.T) {
+	_, err := Load(writeFile(t, "config.yaml", "netbox:\n  url: https://netbox.example.test\n"))
+	if err == nil || !strings.Contains(err.Error(), "netbox.servers is required") {
+		t.Fatalf("Load() error = %v", err)
+	}
+}
+
 func TestLoadCredentials(t *testing.T) {
-	path := writeFile(t, "credentials.yaml", "netbox:\n  token: example-token\n")
+	path := writeFile(t, "credentials.yaml", "netbox:\n  servers:\n    production:\n      token: example-token\n")
 	credentials, err := LoadCredentials(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if credentials.NetBox.Token != "example-token" {
-		t.Fatalf("token = %q", credentials.NetBox.Token)
+	if got, err := credentials.TokenFor("production"); err != nil || got != "example-token" {
+		t.Fatalf("TokenFor() = %q, %v", got, err)
+	}
+}
+
+func TestCredentialsTokenForServer(t *testing.T) {
+	path := writeFile(t, "credentials.yaml", "netbox:\n  servers:\n    production:\n      token: production-token\n    lab:\n      token: lab-token\n")
+	credentials, err := LoadCredentials(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := credentials.TokenFor("PRODUCTION"); err != nil || got != "production-token" {
+		t.Fatalf("TokenFor() = %q, %v", got, err)
+	}
+	if _, err := credentials.TokenFor("missing"); err == nil || !strings.Contains(err.Error(), "netbox.servers.missing.token") {
+		t.Fatalf("TokenFor() error = %v", err)
 	}
 }
 
 func TestLoadCredentialsRejectsMissingToken(t *testing.T) {
-	path := writeFile(t, "credentials.yaml", "netbox:\n  token: '   '\n")
+	path := writeFile(t, "credentials.yaml", "netbox:\n")
 	_, err := LoadCredentials(path)
-	if err == nil || !strings.Contains(err.Error(), "netbox.token is required") {
+	if err == nil || !strings.Contains(err.Error(), "netbox.servers is required") {
+		t.Fatalf("LoadCredentials() error = %v", err)
+	}
+}
+
+func TestLoadCredentialsRejectsLegacyNetBoxToken(t *testing.T) {
+	_, err := LoadCredentials(writeFile(t, "credentials.yaml", "netbox:\n  token: example-token\n"))
+	if err == nil || !strings.Contains(err.Error(), "netbox.servers is required") {
 		t.Fatalf("LoadCredentials() error = %v", err)
 	}
 }

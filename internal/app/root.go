@@ -44,6 +44,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 	var cachePath string
 	var debugAPI bool
 	var connectDebugAPI bool
+	var serverName string
 	var target string
 	var serviceName string
 	var endpoint string
@@ -89,19 +90,30 @@ func newRootCommand(deps dependencies) *cobra.Command {
 		if err != nil {
 			return nil, err
 		}
-		client, err := deps.newClient(configuration.NetBox.URL, credentials.NetBox.Token)
-		if err != nil {
-			return nil, err
-		}
-		if debugOutput != nil {
-			client.SetDebugOutput(debugOutput)
-		}
-		if err := client.Validate(ctx); err != nil {
-			return nil, err
-		}
-		services, err := client.Services(ctx)
-		if err != nil {
-			return nil, err
+		var services []netbox.Service
+		for _, server := range configuration.NetBox.Servers {
+			token, err := credentials.TokenFor(server.Name)
+			if err != nil {
+				return nil, err
+			}
+			client, err := deps.newClient(server.URL, token)
+			if err != nil {
+				return nil, err
+			}
+			if debugOutput != nil {
+				client.SetDebugOutput(debugOutput)
+			}
+			if err := client.Validate(ctx); err != nil {
+				return nil, fmt.Errorf("validate NetBox server %q: %w", server.Name, err)
+			}
+			serverServices, err := client.Services(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("query NetBox server %q: %w", server.Name, err)
+			}
+			for index := range serverServices {
+				serverServices[index].Server = server.Name
+			}
+			services = append(services, serverServices...)
 		}
 		services = filterServices(services, configuration.Services.Enabled)
 		if err := (cache.Store{Path: serviceCachePath}).Write(services, deps.now()); err != nil {
@@ -154,7 +166,8 @@ func newRootCommand(deps dependencies) *cobra.Command {
 				return err
 			}
 
-			selection, err := selectService(command.Context(), snapshot.Services, target, serviceName, endpoint, configuration.Ping.Count, func(ctx context.Context) ([]netbox.Service, error) {
+			services := filterServicesByServer(snapshot.Services, serverName)
+			selection, err := selectService(command.Context(), services, target, serviceName, endpoint, configuration.Ping.Count, func(ctx context.Context) ([]netbox.Service, error) {
 				return refreshServices(ctx, nil)
 			})
 			if err != nil {
@@ -176,6 +189,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 			return process.Run()
 		},
 	}
+	connectCommand.Flags().StringVar(&serverName, "server", "", "NetBox server name")
 	connectCommand.Flags().StringVar(&target, "target", "", "target device or virtual machine name")
 	connectCommand.Flags().StringVar(&serviceName, "service", "", "NetBox service name")
 	connectCommand.Flags().StringVar(&endpoint, "endpoint", "", "endpoint in host:port form")
@@ -268,11 +282,25 @@ func filterServices(services []netbox.Service, enabledNames []string) []netbox.S
 	return filtered
 }
 
+func filterServicesByServer(services []netbox.Service, serverName string) []netbox.Service {
+	serverName = strings.TrimSpace(serverName)
+	if serverName == "" {
+		return services
+	}
+	filtered := make([]netbox.Service, 0, len(services))
+	for _, service := range services {
+		if strings.EqualFold(service.Server, serverName) {
+			filtered = append(filtered, service)
+		}
+	}
+	return filtered
+}
+
 func writeServices(output io.Writer, services []netbox.Service) {
 	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "TARGET\tSERVICE\tENDPOINTS\tROLE\tTENANT\tSTATUS")
+	fmt.Fprintln(writer, "SERVER\tTARGET\tSERVICE\tENDPOINTS\tROLE\tTENANT\tSTATUS")
 	for _, service := range services {
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n", service.TargetName(), service.Name, join(service.Endpoints()), service.Role, service.Tenant, service.Status)
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", service.Server, service.TargetName(), service.Name, join(service.Endpoints()), service.Role, service.Tenant, service.Status)
 	}
 	writer.Flush()
 }

@@ -26,7 +26,7 @@ func choiceSearchIndex(choices []Selection) []string {
 	for position, selection := range choices {
 		service := selection.Service
 		index[position] = strings.ToLower(strings.Join([]string{
-			service.TargetName(), service.Name, selection.Endpoint, service.Role, service.Tenant, service.Status,
+			service.Server, service.TargetName(), service.Name, selection.Endpoint, service.Role, service.Tenant, service.Status,
 		}, " "))
 	}
 	return index
@@ -125,5 +125,8 @@ func (model model) isRecent(key string) bool {
 
 func selectionKey(selection Selection) string {
 	parts := []string{strings.ToLower(strings.TrimSpace(selection.Service.TargetName())), strings.ToLower(strings.TrimSpace(selection.Service.Name)), strings.ToLower(strings.TrimSpace(selection.Endpoint))}
+	if server := strings.ToLower(strings.TrimSpace(selection.Service.Server)); server != "" {
+		parts = append([]string{server}, parts...)
+	}
 	return strings.Join(parts, "::")
 }

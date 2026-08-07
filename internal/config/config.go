@@ -20,7 +20,12 @@ type Config struct {
 }
 
 type NetBoxConfig struct {
-	URL string `yaml:"url"`
+	Servers []NetBoxServer `yaml:"servers"`
+}
+
+type NetBoxServer struct {
+	Name string `yaml:"name"`
+	URL  string `yaml:"url"`
 }
 
 type ServicesConfig struct {
@@ -56,8 +61,12 @@ type rawConfig struct {
 
 type Credentials struct {
 	NetBox struct {
-		Token string `yaml:"token"`
+		Servers map[string]NetBoxServerCredentials `yaml:"servers"`
 	} `yaml:"netbox"`
+}
+
+type NetBoxServerCredentials struct {
+	Token string `yaml:"token"`
 }
 
 func DefaultConfigPath() (string, error) {
@@ -83,13 +92,28 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parse configuration %q: %w", path, err)
 	}
 
-	if strings.TrimSpace(raw.NetBox.URL) == "" {
-		return Config{}, errors.New("netbox.url is required")
+	servers := raw.NetBox.Servers
+	if len(servers) == 0 {
+		return Config{}, errors.New("netbox.servers is required")
 	}
-
-	parsedURL := strings.TrimRight(strings.TrimSpace(raw.NetBox.URL), "/")
-	if !strings.HasPrefix(parsedURL, "https://") && !strings.HasPrefix(parsedURL, "http://") {
-		return Config{}, errors.New("netbox.url must start with http:// or https://")
+	serverNames := make(map[string]struct{}, len(servers))
+	for index := range servers {
+		server := &servers[index]
+		server.Name = strings.TrimSpace(server.Name)
+		server.URL = strings.TrimRight(strings.TrimSpace(server.URL), "/")
+		if server.Name == "" {
+			return Config{}, fmt.Errorf("netbox.servers[%d].name is required", index)
+		}
+		if _, exists := serverNames[strings.ToLower(server.Name)]; exists {
+			return Config{}, fmt.Errorf("netbox.servers contains duplicate name %q", server.Name)
+		}
+		serverNames[strings.ToLower(server.Name)] = struct{}{}
+		if server.URL == "" {
+			return Config{}, fmt.Errorf("netbox.servers[%d].url is required", index)
+		}
+		if !strings.HasPrefix(server.URL, "https://") && !strings.HasPrefix(server.URL, "http://") {
+			return Config{}, fmt.Errorf("netbox.servers[%d].url must start with http:// or https://", index)
+		}
 	}
 
 	ttl := 15 * time.Minute
@@ -115,7 +139,7 @@ func Load(path string) (Config, error) {
 		raw.SSH.Keys[user] = key
 	}
 
-	return Config{NetBox: NetBoxConfig{URL: parsedURL}, Services: raw.Services, SSH: raw.SSH, Cache: CacheConfig{TTL: ttl}, Ping: PingConfig{Count: pingCount}}, nil
+	return Config{NetBox: NetBoxConfig{Servers: servers}, Services: raw.Services, SSH: raw.SSH, Cache: CacheConfig{TTL: ttl}, Ping: PingConfig{Count: pingCount}}, nil
 }
 
 func expandHome(path string) (string, error) {
@@ -143,8 +167,17 @@ func LoadCredentials(path string) (Credentials, error) {
 	if err := yaml.Unmarshal(contents, &credentials); err != nil {
 		return Credentials{}, fmt.Errorf("parse credentials %q: %w", path, err)
 	}
-	if strings.TrimSpace(credentials.NetBox.Token) == "" {
-		return Credentials{}, errors.New("netbox.token is required in credentials")
+	if len(credentials.NetBox.Servers) == 0 {
+		return Credentials{}, errors.New("netbox.servers is required in credentials")
 	}
 	return credentials, nil
+}
+
+func (credentials Credentials) TokenFor(serverName string) (string, error) {
+	for name, server := range credentials.NetBox.Servers {
+		if strings.EqualFold(strings.TrimSpace(name), serverName) && strings.TrimSpace(server.Token) != "" {
+			return strings.TrimSpace(server.Token), nil
+		}
+	}
+	return "", fmt.Errorf("netbox.servers.%s.token is required in credentials", serverName)
 }

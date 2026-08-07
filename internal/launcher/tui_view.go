@@ -39,9 +39,14 @@ func (model model) View() string {
 		output.WriteString("No matching services\n")
 	} else {
 		widths := model.columnWidths()
+		showServer := model.hasMultipleServers()
 		start, end := model.visibleRange(len(visible))
-		endpointWidth := model.endpointWidth(widths)
-		output.WriteString(renderStyled(headingStyle, fmt.Sprintf("      %-*s %-*s %s", widths[0], "TARGET", widths[1], "SERVICE", "ENDPOINT")))
+		endpointWidth := model.endpointWidth(widths, showServer)
+		if showServer {
+			output.WriteString(renderStyled(headingStyle, fmt.Sprintf("      %-*s %-*s %-*s %s", widths[1], "TARGET", widths[2], "SERVICE", endpointWidth, "ENDPOINT", "SERVER")))
+		} else {
+			output.WriteString(renderStyled(headingStyle, fmt.Sprintf("      %-*s %-*s %s", widths[1], "TARGET", widths[2], "SERVICE", "ENDPOINT")))
+		}
 		output.WriteString("\n")
 		lastPriority := -1
 		for index := start; index < end; index++ {
@@ -69,7 +74,12 @@ func (model model) View() string {
 			if model.favorites[selectionKey(selection)] {
 				favorite = "*"
 			}
-			row := fmt.Sprintf("%s%s%s %-*s %-*s %s", prefix, shortcut, favorite, widths[0], truncate(selection.Service.TargetName(), widths[0]), widths[1], truncate(selection.Service.Name, widths[1]), truncate(selection.Endpoint, endpointWidth))
+			var row string
+			if showServer {
+				row = fmt.Sprintf("%s%s%s %-*s %-*s %-*s %s", prefix, shortcut, favorite, widths[1], truncate(selection.Service.TargetName(), widths[1]), widths[2], truncate(selection.Service.Name, widths[2]), endpointWidth, truncate(selection.Endpoint, endpointWidth), truncate(selection.Service.Server, widths[0]))
+			} else {
+				row = fmt.Sprintf("%s%s%s %-*s %-*s %s", prefix, shortcut, favorite, widths[1], truncate(selection.Service.TargetName(), widths[1]), widths[2], truncate(selection.Service.Name, widths[2]), truncate(selection.Endpoint, endpointWidth))
+			}
 			if index == model.cursor {
 				row = renderStyled(selectedRowStyle, row)
 			}
@@ -171,29 +181,54 @@ func renderStyled(style, value string) string {
 	return style + value + ansiReset
 }
 
-func (model model) columnWidths() [2]int {
-	widths := [2]int{len("TARGET"), len("SERVICE")}
+func (model model) columnWidths() [3]int {
+	widths := [3]int{len("SERVER"), len("TARGET"), len("SERVICE")}
 	for _, selection := range model.choices {
-		fields := [2]string{selection.Service.TargetName(), selection.Service.Name}
+		fields := [3]string{selection.Service.Server, selection.Service.TargetName(), selection.Service.Name}
 		for index, field := range fields {
 			widths[index] = max(widths[index], len(field))
 		}
 	}
-	if model.width > 0 {
+	if model.width > 0 && model.hasMultipleServers() {
+		maximumFields := max(3, model.width-20)
+		if widths[0]+widths[1]+widths[2] > maximumFields {
+			widths[0] = max(1, maximumFields/4)
+			widths[1] = max(1, maximumFields/2)
+			widths[2] = max(1, maximumFields-widths[0]-widths[1])
+		}
+	} else if model.width > 0 {
 		maximumFields := max(2, model.width-16)
-		if widths[0]+widths[1] > maximumFields {
-			widths[0] = max(1, maximumFields*2/3)
-			widths[1] = max(1, maximumFields-widths[0])
+		if widths[1]+widths[2] > maximumFields {
+			widths[1] = max(1, maximumFields*2/3)
+			widths[2] = max(1, maximumFields-widths[1])
 		}
 	}
 	return widths
 }
 
-func (model model) endpointWidth(widths [2]int) int {
+func (model model) endpointWidth(widths [3]int, showServer bool) int {
 	if model.width <= 0 {
 		return 1 << 30
 	}
-	return max(1, model.width-8-widths[0]-widths[1])
+	if !showServer {
+		return max(1, model.width-8-widths[1]-widths[2])
+	}
+	return max(1, model.width-12-widths[0]-widths[1]-widths[2])
+}
+
+func (model model) hasMultipleServers() bool {
+	servers := make(map[string]struct{})
+	for _, selection := range model.choices {
+		server := strings.ToLower(strings.TrimSpace(selection.Service.Server))
+		if server == "" {
+			continue
+		}
+		servers[server] = struct{}{}
+		if len(servers) > 1 {
+			return true
+		}
+	}
+	return false
 }
 
 func (model model) visibleRange(choiceCount int) (int, int) {
@@ -232,6 +267,10 @@ func (model model) writeSelectionDetails(output *strings.Builder, selection Sele
 	favorite := "no"
 	if model.favorites[selectionKey(selection)] {
 		favorite = "yes"
+	}
+	if service.Server != "" {
+		fmt.Fprintf(output, "\nDetails: server: %s | favorite: %s | role: %s | tenant: %s | status: %s\n", service.Server, favorite, valueOrUnknown(service.Role), valueOrUnknown(service.Tenant), renderStyled(statusStyle(service.Status), valueOrUnknown(service.Status)))
+		return
 	}
 	fmt.Fprintf(output, "\nDetails: favorite: %s | role: %s | tenant: %s | status: %s\n", favorite, valueOrUnknown(service.Role), valueOrUnknown(service.Tenant), renderStyled(statusStyle(service.Status), valueOrUnknown(service.Status)))
 }

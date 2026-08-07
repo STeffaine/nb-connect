@@ -26,3 +26,14 @@ func TestVisibleChoicesRebuildsStaleSearchIndex(t *testing.T) {
 		t.Fatalf("visible choices with stale index = %#v", got)
 	}
 }
+
+func TestChoiceSearchAndKeysIncludeServer(t *testing.T) {
+	production := Selection{Service: netbox.Service{Server: "production", Device: "router-01", Name: "sshd"}, Endpoint: "192.0.2.10:22"}
+	lab := Selection{Service: netbox.Service{Server: "lab", Device: "router-01", Name: "sshd"}, Endpoint: "192.0.2.10:22"}
+	if got := choiceSearchIndex([]Selection{production})[0]; !strings.Contains(got, "production") {
+		t.Fatalf("search index = %q", got)
+	}
+	if selectionKey(production) == selectionKey(lab) {
+		t.Fatal("selection keys must differ by NetBox server")
+	}
+}

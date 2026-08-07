@@ -6,6 +6,7 @@ import (
 )
 
 type Service struct {
+	Server   string   `json:"server,omitempty"`
 	Device   string   `json:"device"`
 	VM       string   `json:"virtual_machine,omitempty"`
 	Name     string   `json:"service"`
