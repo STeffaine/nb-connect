@@ -172,12 +172,6 @@ func TestModelPingsSelectedEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selector.ping = func(_ context.Context, endpoint string) (string, error) {
-		if endpoint != "192.0.2.10:22" {
-			t.Fatalf("ping endpoint = %q", endpoint)
-		}
-		return "PING 192.0.2.10\n", nil
-	}
 	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	selector = updated.(model)
 	if selector.selection != nil || !selector.pinging {
@@ -186,10 +180,15 @@ func TestModelPingsSelectedEndpoint(t *testing.T) {
 	if command == nil {
 		t.Fatal("ping shortcut does not start")
 	}
-	updated, _ = selector.Update(command())
+	updated, _ = selector.Update(pingMessage{line: "64 bytes from 192.0.2.10"})
 	selector = updated.(model)
-	if selector.pinging || !strings.Contains(selector.View(), "PING 192.0.2.10") {
-		t.Fatalf("ping result model = %#v", selector)
+	if !selector.pinging || !strings.Contains(selector.View(), "64 bytes from 192.0.2.10") {
+		t.Fatalf("live ping model = %#v", selector)
+	}
+	updated, _ = selector.Update(pingMessage{done: true})
+	selector = updated.(model)
+	if selector.pinging {
+		t.Fatalf("completed ping model = %#v", selector)
 	}
 }
 

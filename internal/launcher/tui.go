@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -69,7 +70,7 @@ type model struct {
 	pingNote  string
 	context   context.Context
 	sync      SyncServices
-	ping      func(context.Context, string) (string, error)
+	pingLines chan pingMessage
 	selection *Selection
 	cancelled bool
 	favorites map[string]bool
@@ -82,9 +83,10 @@ type syncResult struct {
 	err      error
 }
 
-type pingResult struct {
-	output string
-	err    error
+type pingMessage struct {
+	line string
+	err  error
+	done bool
 }
 
 func newModel(ctx context.Context, services []netbox.Service, syncServices SyncServices) (model, error) {
@@ -100,7 +102,7 @@ func newModel(ctx context.Context, services []netbox.Service, syncServices SyncS
 		favorites = map[string]bool{}
 		recents = nil
 	}
-	return model{choices: choices, context: ctx, filter: filter, sync: syncServices, ping: runPing, favorites: favorites, recents: recents, statePath: statePath}, nil
+	return model{choices: choices, context: ctx, filter: filter, sync: syncServices, favorites: favorites, recents: recents, statePath: statePath}, nil
 }
 
 func choicesForServices(services []netbox.Service) ([]Selection, error) {
@@ -122,17 +124,25 @@ func (model model) Init() tea.Cmd {
 
 func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
-	case pingResult:
-		model.pinging = false
+	case pingMessage:
+		if message.line != "" {
+			if model.pingNote != "" {
+				model.pingNote += "\n"
+			}
+			model.pingNote += message.line
+		}
 		if message.err != nil {
-			model.pingNote = fmt.Sprintf("Ping failed: %s", strings.TrimSpace(message.output))
-			if model.pingNote == "Ping failed:" {
+			model.pinging = false
+			if model.pingNote == "" {
 				model.pingNote = fmt.Sprintf("Ping failed: %v", message.err)
 			}
 			return model, nil
 		}
-		model.pingNote = strings.TrimSpace(message.output)
-		return model, nil
+		if message.done {
+			model.pinging = false
+			return model, nil
+		}
+		return model, waitForPingMessage(model.pingLines)
 	case syncResult:
 		model.syncing = false
 		if message.err != nil {
@@ -229,10 +239,8 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				selection := visible[model.cursor]
 				model.pinging = true
 				model.pingNote = ""
-				return model, func() tea.Msg {
-					output, err := model.ping(model.context, selection.Endpoint)
-					return pingResult{output: output, err: err}
-				}
+				model.pingLines = make(chan pingMessage, 16)
+				return model, startPing(model.context, selection.Endpoint, model.pingLines)
 			}
 			return model, nil
 		case "l":
@@ -275,7 +283,11 @@ func (model model) View() string {
 	if model.syncing {
 		output.WriteString("Syncing services from NetBox...\n\n")
 	} else if model.pinging {
-		output.WriteString("Pinging selected endpoint...\n\n")
+		output.WriteString("Pinging selected endpoint...\n")
+		if model.pingNote != "" {
+			fmt.Fprintf(&output, "%s\n", model.pingNote)
+		}
+		output.WriteString("\n")
 	} else if model.syncError != "" {
 		fmt.Fprintf(&output, "Sync failed: %s\n\n", model.syncError)
 	} else if model.syncNote != "" {
@@ -336,13 +348,53 @@ func numberShortcut(key string) (int, bool) {
 	return int(key[0] - '1'), true
 }
 
-func runPing(ctx context.Context, endpoint string) (string, error) {
+func startPing(ctx context.Context, endpoint string, messages chan pingMessage) tea.Cmd {
+	return func() tea.Msg {
+		host, err := pingHost(endpoint)
+		if err != nil {
+			return pingMessage{err: err}
+		}
+		go streamPing(ctx, host, messages)
+		return <-messages
+	}
+}
+
+func waitForPingMessage(messages <-chan pingMessage) tea.Cmd {
+	return func() tea.Msg {
+		return <-messages
+	}
+}
+
+func streamPing(ctx context.Context, host string, messages chan<- pingMessage) {
+	defer close(messages)
+	command := exec.CommandContext(ctx, "ping", "-c", "2", host)
+	output, err := command.StdoutPipe()
+	if err != nil {
+		messages <- pingMessage{err: err}
+		return
+	}
+	command.Stderr = command.Stdout
+	if err := command.Start(); err != nil {
+		messages <- pingMessage{err: err}
+		return
+	}
+	scanner := bufio.NewScanner(output)
+	for scanner.Scan() {
+		messages <- pingMessage{line: scanner.Text()}
+	}
+	if err := scanner.Err(); err != nil {
+		messages <- pingMessage{err: err}
+		return
+	}
+	messages <- pingMessage{err: command.Wait(), done: true}
+}
+
+func pingHost(endpoint string) (string, error) {
 	host, port, err := net.SplitHostPort(endpoint)
 	if err != nil || strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
 		return "", fmt.Errorf("invalid endpoint %q", endpoint)
 	}
-	output, err := exec.CommandContext(ctx, "ping", "-c", "4", host).CombinedOutput()
-	return string(output), err
+	return host, nil
 }
 
 func (model model) columnWidths() [2]int {
