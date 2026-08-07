@@ -2,7 +2,7 @@ package launcher
 
 import (
 	"context"
-	"path/filepath"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -132,6 +132,30 @@ func TestModelViewShowsCompactAlignedColumnsAndSelectedDetails(t *testing.T) {
 	selector = updated.(model)
 	if view = selector.View(); !strings.Contains(view, "Details: favorite: no | role: Application | tenant: Platform | status: planned") {
 		t.Fatalf("view does not update selected details: %q", view)
+	}
+}
+
+func TestModelResizesListToTerminalViewport(t *testing.T) {
+	services := make([]netbox.Service, 0, 12)
+	for index := range 12 {
+		services = append(services, netbox.Service{Device: fmt.Sprintf("router-%02d", index), Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}})
+	}
+	selector, err := newModel(context.Background(), services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := selector.Update(tea.WindowSizeMsg{Width: 32, Height: 12})
+	selector = updated.(model)
+	if selector.width != 32 || selector.height != 12 {
+		t.Fatalf("terminal size = %dx%d", selector.width, selector.height)
+	}
+	selector.cursor = 10
+	start, end := selector.visibleRange(len(selector.visibleChoices()))
+	if start == 0 || end-start != 2 {
+		t.Fatalf("visible range = %d:%d", start, end)
+	}
+	if view := selector.View(); strings.Contains(view, "router-00") || !strings.Contains(view, "router-10") {
+		t.Fatalf("resized view does not follow cursor: %q", view)
 	}
 }
 

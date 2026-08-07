@@ -72,6 +72,8 @@ type model struct {
 	sync      SyncServices
 	pingLines chan pingMessage
 	pingCount int
+	width     int
+	height    int
 	selection *Selection
 	cancelled bool
 	favorites map[string]bool
@@ -129,6 +131,10 @@ func (model model) Init() tea.Cmd {
 
 func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
+	case tea.WindowSizeMsg:
+		model.width = message.Width
+		model.height = message.Height
+		return model, nil
 	case pingMessage:
 		if message.line != "" {
 			if model.pingNote != "" {
@@ -304,10 +310,13 @@ func (model model) View() string {
 		output.WriteString("No matching services\n")
 	} else {
 		widths := model.columnWidths()
+		start, end := model.visibleRange(len(visible))
+		endpointWidth := model.endpointWidth(widths)
 		output.WriteString(headingStyle.Render(fmt.Sprintf("      %-*s %-*s %s", widths[0], "TARGET", widths[1], "SERVICE", "ENDPOINT")))
 		output.WriteString("\n")
 		lastPriority := -1
-		for index, selection := range visible {
+		for index := start; index < end; index++ {
+			selection := visible[index]
 			priority := model.priorityFor(selection)
 			if priority != lastPriority {
 				if lastPriority != -1 {
@@ -329,7 +338,7 @@ func (model model) View() string {
 			if model.favorites[selectionKey(selection)] {
 				favorite = "*"
 			}
-			row := fmt.Sprintf("%s%s%s %-*s %-*s %s", prefix, shortcut, favorite, widths[0], selection.Service.TargetName(), widths[1], selection.Service.Name, selection.Endpoint)
+			row := fmt.Sprintf("%s%s%s %-*s %-*s %s", prefix, shortcut, favorite, widths[0], truncate(selection.Service.TargetName(), widths[0]), widths[1], truncate(selection.Service.Name, widths[1]), truncate(selection.Endpoint, endpointWidth))
 			if index == model.cursor {
 				row = selectedRowStyle.Render(row)
 			}
@@ -410,7 +419,52 @@ func (model model) columnWidths() [2]int {
 			widths[index] = max(widths[index], len(field))
 		}
 	}
+	if model.width > 0 {
+		maximumFields := max(2, model.width-16)
+		if widths[0]+widths[1] > maximumFields {
+			widths[0] = max(1, maximumFields*2/3)
+			widths[1] = max(1, maximumFields-widths[0])
+		}
+	}
 	return widths
+}
+
+func (model model) endpointWidth(widths [2]int) int {
+	if model.width <= 0 {
+		return 1 << 30
+	}
+	return max(1, model.width-8-widths[0]-widths[1])
+}
+
+func (model model) visibleRange(choiceCount int) (int, int) {
+	if model.height <= 0 || choiceCount == 0 {
+		return 0, choiceCount
+	}
+	rowCount := max(1, model.height-10)
+	if choiceCount <= rowCount {
+		return 0, choiceCount
+	}
+	start := max(0, model.cursor-rowCount/2)
+	end := start + rowCount
+	if end > choiceCount {
+		end = choiceCount
+		start = end - rowCount
+	}
+	return start, end
+}
+
+func truncate(value string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	if width == 1 {
+		return string(runes[:1])
+	}
+	return string(runes[:width-1]) + "~"
 }
 
 func (model model) writeSelectionDetails(output *strings.Builder, selection Selection) {
