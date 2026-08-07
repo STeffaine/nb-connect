@@ -10,6 +10,7 @@ services:
   # Service matching ignores case and surrounding whitespace.
   enabled:
     - sshd
+    # - telnet
 
 ssh:
   # Used by the SSH connector for matching NetBox SSH services.

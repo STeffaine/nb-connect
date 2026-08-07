@@ -50,7 +50,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 	var refresh bool
 	var dryRun bool
 
-	root := &cobra.Command{Use: "nbcon", Short: "Launch services discovered from NetBox"}
+	root := &cobra.Command{Use: "nbcon", Short: "Launch services discovered from NetBox", SilenceUsage: true}
 	root.PersistentFlags().StringVar(&configPath, "config", "", "path to public configuration")
 	root.PersistentFlags().StringVar(&credentialsPath, "credentials", "", "path to NetBox credentials")
 	root.PersistentFlags().StringVar(&cachePath, "cache", "", "path to service cache")
@@ -160,17 +160,16 @@ func newRootCommand(deps dependencies) *cobra.Command {
 			if err != nil {
 				return ignoreSelectionCancellation(err)
 			}
-			identityFile := configuration.SSH.Keys[configuration.SSH.DefaultUser].IdentityFile
-			sshCommand, err := connector.SSH(selection.Service, selection.Endpoint, configuration.SSH.DefaultUser, identityFile)
+			connectionCommand, err := connectionCommandFor(selection, configuration)
 			if err != nil {
 				return err
 			}
 			if dryRun {
-				fmt.Fprintln(command.OutOrStdout(), formatCommand(sshCommand))
+				fmt.Fprintln(command.OutOrStdout(), formatCommand(connectionCommand))
 				return nil
 			}
 
-			process := exec.CommandContext(command.Context(), sshCommand.Name, sshCommand.Args...)
+			process := exec.CommandContext(command.Context(), connectionCommand.Name, connectionCommand.Args...)
 			process.Stdin = command.InOrStdin()
 			process.Stdout = command.OutOrStdout()
 			process.Stderr = command.ErrOrStderr()
@@ -211,6 +210,14 @@ func ignoreSelectionCancellation(err error) error {
 		return nil
 	}
 	return err
+}
+
+func connectionCommandFor(selection launcher.Selection, configuration config.Config) (connector.Command, error) {
+	if strings.EqualFold(strings.TrimSpace(selection.Service.Name), "telnet") {
+		return connector.Telnet(selection.Service, selection.Endpoint)
+	}
+	identityFile := configuration.SSH.Keys[configuration.SSH.DefaultUser].IdentityFile
+	return connector.SSH(selection.Service, selection.Endpoint, configuration.SSH.DefaultUser, identityFile)
 }
 
 func selectService(ctx context.Context, services []netbox.Service, target, serviceName, endpoint string, syncServices launcher.SyncServices) (launcher.Selection, error) {

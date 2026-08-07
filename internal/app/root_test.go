@@ -105,8 +105,30 @@ func TestRunConnectDryRunBuildsSSHCommand(t *testing.T) {
 	}
 }
 
+func TestRunConnectDryRunBuildsTelnetCommand(t *testing.T) {
+	directory := t.TempDir()
+	cachePath := filepath.Join(directory, "services.json")
+	services := []netbox.Service{{Device: "switch-01", Name: "telnet", Protocol: "tcp", IPs: []string{"192.0.2.11/32"}, Ports: []int{23}}}
+	if err := (cache.Store{Path: cachePath}).Write(services, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	configPath := writeTestFile(t, directory, "config.yaml", "netbox:\n  url: https://netbox.example.test\n")
+
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--config", configPath, "--cache", cachePath, "connect", "--target", "switch-01", "--service", "telnet", "--dry-run"}, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), `telnet "192.0.2.11" "23"`+"\n"; got != want {
+		t.Fatalf("dry-run output = %q, want %q", got, want)
+	}
+}
+
 func TestRootCommandRunsConnectByDefault(t *testing.T) {
 	root := newRootCommand(dependencies{})
+	if !root.SilenceUsage {
+		t.Fatal("root command prints usage after an error")
+	}
 	connectCommand, _, err := root.Find([]string{"connect"})
 	if err != nil {
 		t.Fatal(err)
