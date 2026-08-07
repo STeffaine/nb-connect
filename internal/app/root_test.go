@@ -142,7 +142,7 @@ func TestRootCommandRunsConnectByDefault(t *testing.T) {
 }
 
 func TestSelectServiceRequiresBothExplicitSelectors(t *testing.T) {
-	_, err := selectService(context.Background(), nil, "router-01", "", "", nil)
+	_, err := selectService(context.Background(), nil, "router-01", "", "", 4, nil)
 	if err == nil || !strings.Contains(err.Error(), "must be used together") {
 		t.Fatalf("selectService() error = %v", err)
 	}

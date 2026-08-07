@@ -38,8 +38,8 @@ var (
 	statusProblemStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
 )
 
-func Select(ctx context.Context, services []netbox.Service, syncServices SyncServices) (Selection, error) {
-	selector, err := newModel(ctx, services, syncServices)
+func Select(ctx context.Context, services []netbox.Service, pingCount int, syncServices SyncServices) (Selection, error) {
+	selector, err := newModelWithPingCount(ctx, services, pingCount, syncServices)
 	if err != nil {
 		return Selection{}, err
 	}
@@ -71,6 +71,7 @@ type model struct {
 	context   context.Context
 	sync      SyncServices
 	pingLines chan pingMessage
+	pingCount int
 	selection *Selection
 	cancelled bool
 	favorites map[string]bool
@@ -90,6 +91,10 @@ type pingMessage struct {
 }
 
 func newModel(ctx context.Context, services []netbox.Service, syncServices SyncServices) (model, error) {
+	return newModelWithPingCount(ctx, services, 4, syncServices)
+}
+
+func newModelWithPingCount(ctx context.Context, services []netbox.Service, pingCount int, syncServices SyncServices) (model, error) {
 	choices, err := choicesForServices(services)
 	if err != nil {
 		return model{}, err
@@ -102,7 +107,7 @@ func newModel(ctx context.Context, services []netbox.Service, syncServices SyncS
 		favorites = map[string]bool{}
 		recents = nil
 	}
-	return model{choices: choices, context: ctx, filter: filter, sync: syncServices, favorites: favorites, recents: recents, statePath: statePath}, nil
+	return model{choices: choices, context: ctx, filter: filter, sync: syncServices, pingCount: pingCount, favorites: favorites, recents: recents, statePath: statePath}, nil
 }
 
 func choicesForServices(services []netbox.Service) ([]Selection, error) {
@@ -240,7 +245,7 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.pinging = true
 				model.pingNote = ""
 				model.pingLines = make(chan pingMessage, 16)
-				return model, startPing(model.context, selection.Endpoint, model.pingLines)
+				return model, startPing(model.context, selection.Endpoint, model.pingCount, model.pingLines)
 			}
 			return model, nil
 		case "l":
@@ -348,13 +353,13 @@ func numberShortcut(key string) (int, bool) {
 	return int(key[0] - '1'), true
 }
 
-func startPing(ctx context.Context, endpoint string, messages chan pingMessage) tea.Cmd {
+func startPing(ctx context.Context, endpoint string, count int, messages chan pingMessage) tea.Cmd {
 	return func() tea.Msg {
 		host, err := pingHost(endpoint)
 		if err != nil {
 			return pingMessage{err: err}
 		}
-		go streamPing(ctx, host, messages)
+		go streamPing(ctx, host, count, messages)
 		return <-messages
 	}
 }
@@ -365,9 +370,9 @@ func waitForPingMessage(messages <-chan pingMessage) tea.Cmd {
 	}
 }
 
-func streamPing(ctx context.Context, host string, messages chan<- pingMessage) {
+func streamPing(ctx context.Context, host string, count int, messages chan<- pingMessage) {
 	defer close(messages)
-	command := exec.CommandContext(ctx, "ping", "-c", "2", host)
+	command := exec.CommandContext(ctx, "ping", "-c", fmt.Sprintf("%d", count), host)
 	output, err := command.StdoutPipe()
 	if err != nil {
 		messages <- pingMessage{err: err}

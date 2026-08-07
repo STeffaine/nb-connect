@@ -23,3 +23,7 @@ ssh:
 cache:
   # Go duration syntax; for example: 15m, 1h, or 24h.
   ttl: 15m
+
+ping:
+  # Number of ICMP echo requests sent by the TUI ping action.
+  count: 4

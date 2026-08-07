@@ -154,7 +154,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 				return err
 			}
 
-			selection, err := selectService(command.Context(), snapshot.Services, target, serviceName, endpoint, func(ctx context.Context) ([]netbox.Service, error) {
+			selection, err := selectService(command.Context(), snapshot.Services, target, serviceName, endpoint, configuration.Ping.Count, func(ctx context.Context) ([]netbox.Service, error) {
 				return refreshServices(ctx, nil)
 			})
 			if err != nil {
@@ -220,9 +220,9 @@ func connectionCommandFor(selection launcher.Selection, configuration config.Con
 	return connector.SSH(selection.Service, selection.Endpoint, configuration.SSH.DefaultUser, identityFile)
 }
 
-func selectService(ctx context.Context, services []netbox.Service, target, serviceName, endpoint string, syncServices launcher.SyncServices) (launcher.Selection, error) {
+func selectService(ctx context.Context, services []netbox.Service, target, serviceName, endpoint string, pingCount int, syncServices launcher.SyncServices) (launcher.Selection, error) {
 	if target == "" && serviceName == "" && endpoint == "" {
-		return launcher.Select(ctx, services, syncServices)
+		return launcher.Select(ctx, services, pingCount, syncServices)
 	}
 	if target == "" || serviceName == "" {
 		return launcher.Selection{}, fmt.Errorf("--target and --service must be used together")

@@ -16,6 +16,7 @@ type Config struct {
 	Services ServicesConfig `yaml:"services"`
 	SSH      SSHConfig      `yaml:"ssh"`
 	Cache    CacheConfig    `yaml:"cache"`
+	Ping     PingConfig     `yaml:"ping"`
 }
 
 type NetBoxConfig struct {
@@ -39,10 +40,15 @@ type CacheConfig struct {
 	TTL time.Duration `yaml:"-"`
 }
 
+type PingConfig struct {
+	Count int `yaml:"count"`
+}
+
 type rawConfig struct {
 	NetBox   NetBoxConfig   `yaml:"netbox"`
 	Services ServicesConfig `yaml:"services"`
 	SSH      SSHConfig      `yaml:"ssh"`
+	Ping     PingConfig     `yaml:"ping"`
 	Cache    struct {
 		TTL string `yaml:"ttl"`
 	} `yaml:"cache"`
@@ -93,6 +99,13 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("parse cache.ttl: %w", err)
 		}
 	}
+	pingCount := raw.Ping.Count
+	if pingCount == 0 {
+		pingCount = 4
+	}
+	if pingCount < 1 {
+		return Config{}, errors.New("ping.count must be greater than zero")
+	}
 
 	for user, key := range raw.SSH.Keys {
 		key.IdentityFile, err = expandHome(key.IdentityFile)
@@ -102,7 +115,7 @@ func Load(path string) (Config, error) {
 		raw.SSH.Keys[user] = key
 	}
 
-	return Config{NetBox: NetBoxConfig{URL: parsedURL}, Services: raw.Services, SSH: raw.SSH, Cache: CacheConfig{TTL: ttl}}, nil
+	return Config{NetBox: NetBoxConfig{URL: parsedURL}, Services: raw.Services, SSH: raw.SSH, Cache: CacheConfig{TTL: ttl}, Ping: PingConfig{Count: pingCount}}, nil
 }
 
 func expandHome(path string) (string, error) {

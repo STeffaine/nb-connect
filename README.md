@@ -64,6 +64,15 @@ Use `--refresh` to synchronize with NetBox before reading the cache:
 nbcon connect --refresh
 ```
 
+### Ping checks
+
+In the service selector, press `p` to ping the selected endpoint without leaving the TUI. Configure the number of probes with `ping.count`; it defaults to `4`:
+
+```yaml
+ping:
+	count: 2
+```
+
 ### API debugging
 
 Use `sync --debug-api` to write each NetBox request URL, response status, and raw response body to standard error. Authorization headers and tokens are never printed.

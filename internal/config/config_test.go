@@ -21,6 +21,8 @@ ssh:
 			identity_file: /home/ops/.ssh/id_ops
 cache:
   ttl: 30m
+ping:
+	count: 2
 `)
 
 	configuration, err := Load(path)
@@ -39,6 +41,9 @@ cache:
 	if configuration.Cache.TTL != 30*time.Minute {
 		t.Fatalf("TTL = %s", configuration.Cache.TTL)
 	}
+	if configuration.Ping.Count != 2 {
+		t.Fatalf("Ping.Count = %d", configuration.Ping.Count)
+	}
 	if strings.Join(configuration.Services.Enabled, ",") != "sshd,https" {
 		t.Fatalf("Enabled = %v", configuration.Services.Enabled)
 	}
@@ -53,6 +58,9 @@ func TestLoadUsesDefaultTTL(t *testing.T) {
 	if configuration.Cache.TTL != 15*time.Minute {
 		t.Fatalf("TTL = %s", configuration.Cache.TTL)
 	}
+	if configuration.Ping.Count != 4 {
+		t.Fatalf("Ping.Count = %d", configuration.Ping.Count)
+	}
 }
 
 func TestLoadRejectsInvalidConfiguration(t *testing.T) {
@@ -64,6 +72,7 @@ func TestLoadRejectsInvalidConfiguration(t *testing.T) {
 		{name: "missing URL", contents: "ssh:\n  default_user: ops\n", want: "netbox.url is required"},
 		{name: "invalid URL scheme", contents: "netbox:\n  url: netbox.example.test\n", want: "netbox.url must start"},
 		{name: "invalid TTL", contents: "netbox:\n  url: https://netbox.example.test\ncache:\n  ttl: tomorrow\n", want: "parse cache.ttl"},
+		{name: "invalid ping count", contents: "netbox:\n  url: https://netbox.example.test\nping:\n  count: -1\n", want: "ping.count must be greater than zero"},
 		{name: "invalid YAML", contents: "netbox: [\n", want: "parse configuration"},
 	}
 
