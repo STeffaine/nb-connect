@@ -1,0 +1,24 @@
+# Public nb-connect configuration.
+# Copy this file to ~/.config/nb-connect/config.yaml.
+
+netbox:
+  # Base URL of your NetBox instance. Do not include /api/.
+  url: https://netbox.example.com
+
+services:
+  # Only these NetBox service names are cached and shown by nbcon.
+  # Service matching ignores case and surrounding whitespace.
+  enabled:
+    - sshd
+
+ssh:
+  # Used by the SSH connector for matching NetBox SSH services.
+  default_user: admin
+  keys:
+    admin:
+      # Optional. Use an absolute path or ~/... for this user's private key.
+      identity_file: ~/.ssh/id_admin
+
+cache:
+  # Go duration syntax; for example: 15m, 1h, or 24h.
+  ttl: 15m

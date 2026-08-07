@@ -1,0 +1,122 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestLoad(t *testing.T) {
+	path := writeFile(t, "config.yaml", `
+netbox:
+  url: " https://netbox.example.test/ "
+services:
+  enabled: [sshd, https]
+ssh:
+  default_user: ops
+	keys:
+		ops:
+			identity_file: /home/ops/.ssh/id_ops
+cache:
+  ttl: 30m
+`)
+
+	configuration, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.NetBox.URL != "https://netbox.example.test" {
+		t.Fatalf("NetBox.URL = %q", configuration.NetBox.URL)
+	}
+	if configuration.SSH.DefaultUser != "ops" {
+		t.Fatalf("DefaultUser = %q", configuration.SSH.DefaultUser)
+	}
+	if got := configuration.SSH.Keys["ops"].IdentityFile; got != "/home/ops/.ssh/id_ops" {
+		t.Fatalf("identity file = %q", got)
+	}
+	if configuration.Cache.TTL != 30*time.Minute {
+		t.Fatalf("TTL = %s", configuration.Cache.TTL)
+	}
+	if strings.Join(configuration.Services.Enabled, ",") != "sshd,https" {
+		t.Fatalf("Enabled = %v", configuration.Services.Enabled)
+	}
+}
+
+func TestLoadUsesDefaultTTL(t *testing.T) {
+	path := writeFile(t, "config.yaml", "netbox:\n  url: http://netbox.example.test\n")
+	configuration, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.Cache.TTL != 15*time.Minute {
+		t.Fatalf("TTL = %s", configuration.Cache.TTL)
+	}
+}
+
+func TestLoadRejectsInvalidConfiguration(t *testing.T) {
+	testCases := []struct {
+		name     string
+		contents string
+		want     string
+	}{
+		{name: "missing URL", contents: "ssh:\n  default_user: ops\n", want: "netbox.url is required"},
+		{name: "invalid URL scheme", contents: "netbox:\n  url: netbox.example.test\n", want: "netbox.url must start"},
+		{name: "invalid TTL", contents: "netbox:\n  url: https://netbox.example.test\ncache:\n  ttl: tomorrow\n", want: "parse cache.ttl"},
+		{name: "invalid YAML", contents: "netbox: [\n", want: "parse configuration"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := Load(writeFile(t, "config.yaml", testCase.contents))
+			if err == nil || !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("Load() error = %v, want containing %q", err, testCase.want)
+			}
+		})
+	}
+}
+
+func TestLoadCredentials(t *testing.T) {
+	path := writeFile(t, "credentials.yaml", "netbox:\n  token: example-token\n")
+	credentials, err := LoadCredentials(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credentials.NetBox.Token != "example-token" {
+		t.Fatalf("token = %q", credentials.NetBox.Token)
+	}
+}
+
+func TestLoadCredentialsRejectsMissingToken(t *testing.T) {
+	path := writeFile(t, "credentials.yaml", "netbox:\n  token: '   '\n")
+	_, err := LoadCredentials(path)
+	if err == nil || !strings.Contains(err.Error(), "netbox.token is required") {
+		t.Fatalf("LoadCredentials() error = %v", err)
+	}
+}
+
+func TestDefaultPaths(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	configPath, err := DefaultConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantConfigPath := filepath.Join(configRoot, "nb-connect", "config.yaml")
+	if configPath != wantConfigPath {
+		t.Fatalf("DefaultConfigPath() = %q, want %q", configPath, wantConfigPath)
+	}
+	if got, want := DefaultCredentialsPath(configPath), filepath.Join(configRoot, "nb-connect", "credentials.yaml"); got != want {
+		t.Fatalf("DefaultCredentialsPath() = %q, want %q", got, want)
+	}
+}
+
+func writeFile(t *testing.T, name, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

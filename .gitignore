@@ -27,6 +27,9 @@ go.work.sum
 # env file
 .env
 
+# Local NetBox API token
+credentials.yaml
+
 # Editor/IDE
 # .idea/
 # .vscode/
