@@ -1,9 +1,5 @@
 # nb-connect
 
-`nbcon` discovers NetBox IPAM Services and stores them in a local cache for a terminal-friendly infrastructure connection workflow.
-
-## Current scope
-
 `nbcon` synchronizes NetBox application services into a local cache, enriches them with parent target metadata, and launches configured SSH and telnet services. It uses the cache by default, so connection selection works offline after a successful sync.
 
 ## Installation
