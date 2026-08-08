@@ -57,14 +57,14 @@ The `netbox.servers` mappings are required, including when connecting to only on
 
 1. Copy the example configuration files as shown above. Set each NetBox server URL, add its matching API token, and choose the service names that `nbcon` should expose in `services.enabled`.
 2. Run `nbcon sync` to validate the configured servers and save their enabled services locally. Repeat this whenever NetBox service data changes.
-3. Run `nbcon` to open the cached service selector. Search with `f`, move with arrow keys or `j`/`k`, select with Enter, and press `p` to ping the selected endpoint. Press Esc to exit without connecting.
+3. Run `nbcon` to open the cached service selector. Press `/` to search services, or `f` to filter by NetBox server, tenant, site, and role. In the filter menu, use `j`/`k` or arrow keys to choose a filter category, press Tab to move to its values, then use `j`/`k` or arrow keys to navigate and Space or Enter to select values. Press Tab again to return to filter categories. Press `/` to search values; while searching, use arrow keys to navigate results, Space or Enter to select values, and Esc to return to the options. Press `a` to switch between matching all selected filter categories and any selected category. Select with Enter, press `p` to ping the selected endpoint, and press Esc to exit without connecting.
 4. For automation, use `nbcon connect --target <target> --service <service>`. Add `--server <name>` when targets are duplicated across NetBox instances, and use `--dry-run` to inspect the local connection command first.
 
 The selector and `list` command work from the local cache, so they remain usable without NetBox access after a successful sync. Use `nbcon connect --refresh` when a connection should synchronize before selecting a service.
 
 ## Connecting
 
-The plain `nbcon` command opens a built-in terminal selector over cached services. No additional host package is required. Press `1` through `9` to connect to a numbered result, `f` to search, `s` to synchronize from NetBox, use arrows or `j`/`k` to move, Enter to connect, and Esc to cancel.
+The plain `nbcon` command opens a built-in terminal selector over cached services. No additional host package is required. Press `1` through `9` to connect to a numbered result, `/` to search services, `f` to open filters, `s` to synchronize from NetBox, use arrows or `j`/`k` to move, Enter to connect, and Esc to cancel. Filters can select multiple NetBox servers, tenants, sites, and roles. Values in the same category are alternatives; `all conditions` requires a match in every selected category, while `any condition` accepts a match in any category.
 
 Use explicit selectors for scripts:
 

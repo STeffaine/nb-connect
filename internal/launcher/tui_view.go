@@ -21,11 +21,18 @@ const ansiReset = "\x1b[0m"
 
 func (model model) View() string {
 	var output strings.Builder
+	if model.filtering {
+		model.writeFilterMenu(&output)
+		return output.String()
+	}
 	if model.searching {
 		output.WriteString(model.filter.View())
 		output.WriteString("\n\n")
 	} else if query := strings.TrimSpace(model.filter.Value()); query != "" {
 		fmt.Fprintf(&output, "Filter: %s\n\n", query)
+	}
+	if summary := model.filterSummary(); summary != "" {
+		fmt.Fprintf(&output, "%s\n\n", summary)
 	}
 	visible := model.visibleChoices()
 	if model.syncing {
@@ -91,12 +98,56 @@ func (model model) View() string {
 	if model.searching {
 		output.WriteString("\nEnter apply | Esc clear and return\n")
 	} else {
-		output.WriteString("\n1-9 connect | Enter connect | m favorite | l last used | p ping | f search | s sync | j/k or arrows move | Esc cancel\n")
+		output.WriteString("\n1-9 connect | Enter connect | m favorite | l last used | p ping | / search | f filters | s sync | j/k or arrows move | Esc cancel\n")
 	}
 	if model.pinging || model.pingNote != "" {
 		model.writePingPopup(&output)
 	}
 	return output.String()
+}
+
+func (model model) writeFilterMenu(output *strings.Builder) {
+	mode := "all conditions"
+	if !model.filters.matchAll {
+		mode = "any condition"
+	}
+	fmt.Fprintf(output, "Filters: %s\n", mode)
+	for index, category := range filterCategories {
+		prefix := "  "
+		if !model.filterOptionsFocused && index == model.filterCategory {
+			prefix = "> "
+		}
+		fmt.Fprintf(output, "%s%s\n", prefix, category)
+	}
+	searchPrompt := "Press / to search"
+	if model.filterSearching {
+		searchPrompt = "Search"
+	}
+	fmt.Fprintf(output, "\n%s %s: %s\n\n", searchPrompt, filterCategories[model.filterCategory], model.filterMenuSearch.Value())
+	options := model.filterOptions()
+	if len(options) == 0 {
+		output.WriteString("No matching values\n")
+	}
+	for index, option := range options {
+		prefix := "  "
+		if model.filterOptionsFocused && index == model.filterCursor {
+			prefix = "> "
+		}
+		marker := " "
+		if model.filters.values[filterCategories[model.filterCategory]][option] {
+			marker = "x"
+		}
+		fmt.Fprintf(output, "%s[%s] %s\n", prefix, marker, option)
+	}
+	if model.filterSearching {
+		output.WriteString("\nType to search | arrows move | Space select more | Enter select | Esc clear\n")
+		return
+	}
+	if model.filterOptionsFocused {
+		output.WriteString("\nTab filters | / search values | j/k or arrows move | Space/Enter select | a all/any | Esc close\n")
+		return
+	}
+	output.WriteString("\nTab options | j/k or arrows category | / search values | a all/any | Esc close\n")
 }
 
 func (model model) writePingPopup(output *strings.Builder) {

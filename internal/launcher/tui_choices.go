@@ -49,6 +49,9 @@ func (model model) matchingChoices(query string, searchIndex []string) []Selecti
 		if query != "" && !strings.Contains(candidate, query) && !fuzzyMatch(query, candidate) {
 			continue
 		}
+		if !model.filters.matches(selection) {
+			continue
+		}
 		switch model.priorityFor(selection) {
 		case 0:
 			favorites = append(favorites, selection)

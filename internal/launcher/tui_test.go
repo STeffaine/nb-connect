@@ -20,7 +20,7 @@ func TestModelSearchesFiltersAndSelectsService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, _ := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	updated, _ := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
 	selector = updated.(model)
 	if !selector.searching || !selector.filter.Focused() {
 		t.Fatalf("search mode = %#v", selector)

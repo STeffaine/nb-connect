@@ -44,8 +44,15 @@ type model struct {
 	choices      []Selection
 	choiceSearch []string
 	filter       searchInput
+	filterMenuSearch searchInput
+	filters      serviceFilters
 	cursor       int
 	searching    bool
+	filtering    bool
+	filterSearching      bool
+	filterOptionsFocused bool
+	filterCategory       int
+	filterCursor         int
 	syncing      bool
 	pinging      bool
 	syncError    string
@@ -85,7 +92,7 @@ func newModelWithPingCount(ctx context.Context, services []netbox.Service, pingC
 		favorites = map[string]bool{}
 		recents = nil
 	}
-	return model{choices: choices, choiceSearch: choiceSearchIndex(choices), context: ctx, filter: filter, sync: syncServices, pingCount: pingCount, favorites: favorites, recents: recents, statePath: statePath}, nil
+	return model{choices: choices, choiceSearch: choiceSearchIndex(choices), context: ctx, filter: filter, filters: newServiceFilters(), sync: syncServices, pingCount: pingCount, favorites: favorites, recents: recents, statePath: statePath}, nil
 }
 
 func (model model) Init() tea.Cmd {
@@ -150,6 +157,9 @@ func (model model) updateSync(message syncResult) (model, tea.Cmd) {
 }
 
 func (model model) updateKey(message tea.KeyMsg) (model, tea.Cmd) {
+	if model.filtering {
+		return model.updateFilterKey(message)
+	}
 	if model.searching {
 		return model.updateSearchKey(message)
 	}
@@ -188,9 +198,14 @@ func (model model) updateBrowseKey(message tea.KeyMsg) (model, tea.Cmd) {
 	case "ctrl+c", "esc", "q":
 		model.cancelled = true
 		return model, tea.Quit
-	case "f":
+	case "/":
 		model.searching = true
 		return model, model.filter.Focus()
+	case "f":
+		model.filtering = true
+		model.filterSearching = false
+		model.filterCursor = 0
+		return model, nil
 	case "s":
 		return model.startSync()
 	case "enter":
