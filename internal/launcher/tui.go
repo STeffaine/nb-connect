@@ -25,7 +25,7 @@ func Select(ctx context.Context, services []netbox.Service, pingCount int, syncS
 	if err != nil {
 		return Selection{}, err
 	}
-	program := tea.NewProgram(selector, tea.WithContext(ctx), tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen())
+	program := tea.NewProgram(selector, tea.WithContext(ctx), tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen(), tea.WithFPS(15))
 	result, err := program.Run()
 	if err != nil {
 		return Selection{}, fmt.Errorf("run service selector: %w", err)
@@ -41,34 +41,34 @@ func Select(ctx context.Context, services []netbox.Service, pingCount int, syncS
 }
 
 type model struct {
-	choices      []Selection
-	choiceSearch []string
-	filter       searchInput
-	filterMenuSearch searchInput
-	filters      serviceFilters
-	cursor       int
-	searching    bool
-	filtering    bool
+	choices              []Selection
+	choiceSearch         []string
+	filter               searchInput
+	filterMenuSearch     searchInput
+	filters              serviceFilters
+	cursor               int
+	searching            bool
+	filtering            bool
 	filterSearching      bool
 	filterOptionsFocused bool
 	filterCategory       int
 	filterCursor         int
-	syncing      bool
-	pinging      bool
-	syncError    string
-	syncNote     string
-	pingNote     string
-	context      context.Context
-	sync         SyncServices
-	pingLines    chan pingMessage
-	pingCount    int
-	width        int
-	height       int
-	selection    *Selection
-	cancelled    bool
-	favorites    map[string]bool
-	recents      []string
-	statePath    string
+	syncing              bool
+	pinging              bool
+	syncError            string
+	syncNote             string
+	pingNote             string
+	context              context.Context
+	sync                 SyncServices
+	pingLines            chan pingMessage
+	pingCount            int
+	width                int
+	height               int
+	selection            *Selection
+	cancelled            bool
+	favorites            map[string]bool
+	recents              []string
+	statePath            string
 }
 
 type syncResult struct {
