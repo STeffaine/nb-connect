@@ -91,3 +91,35 @@ func TestFilterMenuSearchesSelectsAndMatchesAllOrAny(t *testing.T) {
 		t.Fatalf("any-condition matches = %#v", got)
 	}
 }
+
+func TestInitialServerFilterAppliesToModel(t *testing.T) {
+	services := []netbox.Service{
+		{Server: "server-a", Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}},
+		{Server: "server-b", Device: "router-02", Name: "sshd", IPs: []string{"192.0.2.11"}, Ports: []int{22}},
+		{Server: "server-a", Device: "switch-01", Name: "telnet", IPs: []string{"192.0.2.12"}, Ports: []int{23}},
+	}
+	selector, err := newModelWithServerFilter(context.Background(), services, "SERVER-A", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !selector.filters.values[filterServer]["server-a"] {
+		t.Fatalf("server filter not applied: %#v", selector.filters)
+	}
+
+	visible := selector.visibleChoices()
+	if len(visible) != 2 {
+		t.Fatalf("visible choices count = %d, want 2", len(visible))
+	}
+	for _, choice := range visible {
+		if choice.Service.Server != "server-a" {
+			t.Fatalf("unexpected choice server = %q, want %q", choice.Service.Server, "server-a")
+		}
+	}
+
+	// Toggle off the server-a filter in the filter menu
+	selector.filters.toggle(filterServer, "server-a")
+	if len(selector.visibleChoices()) != 3 {
+		t.Fatalf("visible choices count after untoggling = %d, want 3", len(selector.visibleChoices()))
+	}
+}

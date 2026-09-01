@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -20,8 +21,8 @@ var ErrSelectionCancelled = errors.New("service selection cancelled")
 
 type SyncServices func(context.Context) ([]netbox.Service, error)
 
-func Select(ctx context.Context, services []netbox.Service, pingCount int, syncServices SyncServices) (Selection, error) {
-	selector, err := newModelWithPingCount(ctx, services, pingCount, syncServices)
+func Select(ctx context.Context, services []netbox.Service, serverFilter string, pingCount int, syncServices SyncServices) (Selection, error) {
+	selector, err := newModelWithPingCount(ctx, services, pingCount, syncServices, serverFilter)
 	if err != nil {
 		return Selection{}, err
 	}
@@ -77,10 +78,14 @@ type syncResult struct {
 }
 
 func newModel(ctx context.Context, services []netbox.Service, syncServices SyncServices) (model, error) {
-	return newModelWithPingCount(ctx, services, 4, syncServices)
+	return newModelWithPingCount(ctx, services, 4, syncServices, "")
 }
 
-func newModelWithPingCount(ctx context.Context, services []netbox.Service, pingCount int, syncServices SyncServices) (model, error) {
+func newModelWithServerFilter(ctx context.Context, services []netbox.Service, serverFilter string, syncServices SyncServices) (model, error) {
+	return newModelWithPingCount(ctx, services, 4, syncServices, serverFilter)
+}
+
+func newModelWithPingCount(ctx context.Context, services []netbox.Service, pingCount int, syncServices SyncServices, serverFilter string) (model, error) {
 	choices, err := choicesForServices(services)
 	if err != nil {
 		return model{}, err
@@ -92,7 +97,18 @@ func newModelWithPingCount(ctx context.Context, services []netbox.Service, pingC
 		favorites = map[string]bool{}
 		recents = nil
 	}
-	return model{choices: choices, choiceSearch: choiceSearchIndex(choices), context: ctx, filter: filter, filters: newServiceFilters(), sync: syncServices, pingCount: pingCount, favorites: favorites, recents: recents, statePath: statePath}, nil
+	filters := newServiceFilters()
+	if trimmed := strings.TrimSpace(serverFilter); trimmed != "" {
+		canonicalServer := trimmed
+		for _, service := range services {
+			if strings.EqualFold(service.Server, trimmed) {
+				canonicalServer = service.Server
+				break
+			}
+		}
+		filters.toggle(filterServer, canonicalServer)
+	}
+	return model{choices: choices, choiceSearch: choiceSearchIndex(choices), context: ctx, filter: filter, filters: filters, sync: syncServices, pingCount: pingCount, favorites: favorites, recents: recents, statePath: statePath}, nil
 }
 
 func (model model) Init() tea.Cmd {

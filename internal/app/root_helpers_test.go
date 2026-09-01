@@ -12,11 +12,25 @@ import (
 
 func TestSelectServiceMatchesCaseInsensitively(t *testing.T) {
 	services := []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}
-	selection, err := selectService(context.Background(), services, "ROUTER-01", "SSHD", "192.0.2.10:22", 4, nil)
+	selection, err := selectService(context.Background(), services, "", "ROUTER-01", "SSHD", "192.0.2.10:22", 4, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if selection.Endpoint != "192.0.2.10:22" || selection.Service.TargetName() != "router-01" {
+		t.Fatalf("selection = %#v", selection)
+	}
+}
+
+func TestSelectServiceFiltersByServer(t *testing.T) {
+	services := []netbox.Service{
+		{Server: "production", Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}},
+		{Server: "lab", Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.11"}, Ports: []int{22}},
+	}
+	selection, err := selectService(context.Background(), services, "lab", "router-01", "sshd", "192.0.2.11:22", 4, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Service.Server != "lab" || selection.Endpoint != "192.0.2.11:22" {
 		t.Fatalf("selection = %#v", selection)
 	}
 }
@@ -36,7 +50,7 @@ func TestSelectServiceRejectsMissingAndAmbiguousMatches(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := selectService(context.Background(), services, "router-01", test.serviceName, "", 4, nil)
+			_, err := selectService(context.Background(), services, "", "router-01", test.serviceName, "", 4, nil)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("selectService() error = %v, want %q", err, test.want)
 			}

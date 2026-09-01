@@ -280,8 +280,30 @@ func TestRootCommandRunsConnectByDefault(t *testing.T) {
 	}
 }
 
+func TestRunRootWithServerArgDryRunBuildsSSHCommand(t *testing.T) {
+	directory := t.TempDir()
+	cachePath := filepath.Join(directory, "services.json")
+	services := []netbox.Service{
+		{Server: "production", Device: "router-01", Name: "sshd", Protocol: "tcp", IPs: []string{"192.0.2.10/32"}, Ports: []int{22}},
+		{Server: "lab", Device: "router-01", Name: "sshd", Protocol: "tcp", IPs: []string{"192.0.2.20/32"}, Ports: []int{22}},
+	}
+	if err := (cache.Store{Path: cachePath}).Write(services, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	configPath := writeTestFile(t, directory, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: https://netbox.example.test\n    - name: lab\n      url: https://lab.example.test\nssh:\n  default_user: ops\n  keys:\n    ops:\n      identity_file: /home/ops/.ssh/id_ops\n")
+
+	var output bytes.Buffer
+	err := Run(context.Background(), []string{"--config", configPath, "--cache", cachePath, "lab", "--target", "router-01", "--service", "sshd", "--dry-run"}, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), `ssh "-i" "/home/ops/.ssh/id_ops" "ops@192.0.2.20" "-p" "22"`+"\n"; got != want {
+		t.Fatalf("dry-run output = %q, want %q", got, want)
+	}
+}
+
 func TestSelectServiceRequiresBothExplicitSelectors(t *testing.T) {
-	_, err := selectService(context.Background(), nil, "router-01", "", "", 4, nil)
+	_, err := selectService(context.Background(), nil, "", "router-01", "", "", 4, nil)
 	if err == nil || !strings.Contains(err.Error(), "must be used together") {
 		t.Fatalf("selectService() error = %v", err)
 	}
