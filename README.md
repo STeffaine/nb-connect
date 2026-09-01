@@ -29,7 +29,7 @@ Add the `PATH` export to your shell profile when `~/.local/bin` is not already o
 
 ### Multiple NetBox servers
 
-Configure each NetBox instance with a unique name and provide a matching token in the credentials file. `nbcon sync` validates and queries every configured server, then writes their combined services to the local cache. The `list` output includes the server name so duplicate targets are distinguishable.
+Configure each NetBox instance with a unique name and provide a matching token in the credentials file. `nbcon sync` validates and queries every configured server, then writes their combined services to the local cache. The `list` output includes the server name so duplicate targets are distinguishable. Run `nbcon sync <server>` (for example, `nbcon sync lab`) to synchronize only that server; cached services for other servers are left unchanged.
 
 ```yaml
 # config.yaml

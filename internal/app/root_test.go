@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/steffaine/nb-connect/internal/cache"
 	"github.com/steffaine/nb-connect/internal/config"
 	"github.com/steffaine/nb-connect/internal/launcher"
@@ -70,6 +72,78 @@ func TestSyncAggregatesMultipleNetBoxServers(t *testing.T) {
 	}
 	if snapshot.Services[0].Server != "production" || snapshot.Services[1].Server != "lab" {
 		t.Fatalf("server labels = %#v", snapshot.Services)
+	}
+}
+
+func TestSyncSingleServerPreservesOtherCachedServices(t *testing.T) {
+	newServer := func(target string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			switch request.URL.Path {
+			case "/api/status/":
+				writer.WriteHeader(http.StatusOK)
+			case "/api/ipam/services/":
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{"next":null,"results":[{"name":"sshd","protocol":"ssh","ports":[22],"ipaddresses":[{"address":"192.0.2.10/24"}],"device":{"name":"` + target + `"}}]}`))
+			default:
+				t.Errorf("unexpected request path %q", request.URL.Path)
+				writer.WriteHeader(http.StatusNotFound)
+			}
+		}))
+	}
+	production := newServer("production-router")
+	defer production.Close()
+	lab := newServer("lab-router")
+	defer lab.Close()
+
+	credentials := config.Credentials{}
+	credentials.NetBox.Servers = map[string]config.NetBoxServerCredentials{
+		"production": {Token: "production-token"},
+		"lab":        {Token: "lab-token"},
+	}
+	configuration := config.Config{NetBox: config.NetBoxConfig{Servers: []config.NetBoxServer{{Name: "production", URL: production.URL}, {Name: "lab", URL: lab.URL}}}, Services: config.ServicesConfig{Enabled: []string{"sshd"}}}
+	cachePath := filepath.Join(t.TempDir(), "services.json")
+	newCommand := func() *cobra.Command {
+		return newRootCommand(dependencies{
+			loadConfig:      func(string) (config.Config, error) { return configuration, nil },
+			loadCredentials: func(string) (config.Credentials, error) { return credentials, nil },
+			defaultConfig:   func() (string, error) { return "config.yaml", nil },
+			defaultCache:    func() (string, error) { return cachePath, nil },
+			newClient:       func(url, token string) (*netbox.Client, error) { return netbox.NewClient(url, token, nil) },
+			now:             time.Now,
+		})
+	}
+
+	full := newCommand()
+	full.SetOut(&bytes.Buffer{})
+	full.SetArgs([]string{"sync"})
+	if err := full.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	single := newCommand()
+	var output bytes.Buffer
+	single.SetOut(&output)
+	single.SetArgs([]string{"sync", "lab"})
+	if err := single.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); !strings.Contains(got, "Found 1 services") {
+		t.Fatalf("sync lab output = %q", got)
+	}
+
+	snapshot, err := (cache.Store{Path: cachePath}).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Services) != 2 {
+		t.Fatalf("service count = %d, want 2", len(snapshot.Services))
+	}
+
+	unknown := newCommand()
+	unknown.SetOut(&bytes.Buffer{})
+	unknown.SetArgs([]string{"sync", "missing"})
+	if err := unknown.ExecuteContext(context.Background()); err == nil {
+		t.Fatal("expected error for unknown server")
 	}
 }
 

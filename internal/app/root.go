@@ -77,7 +77,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 		return configPath, credentialsPath, cachePath, nil
 	}
 
-	refreshServices := func(ctx context.Context, debugOutput io.Writer) ([]netbox.Service, error) {
+	refreshServices := func(ctx context.Context, debugOutput io.Writer, serverFilter string) ([]netbox.Service, error) {
 		configurationPath, credentialPath, serviceCachePath, err := resolvePaths()
 		if err != nil {
 			return nil, err
@@ -90,8 +90,21 @@ func newRootCommand(deps dependencies) *cobra.Command {
 		if err != nil {
 			return nil, err
 		}
+		serversToSync := configuration.NetBox.Servers
+		if serverFilter != "" {
+			serversToSync = nil
+			for _, server := range configuration.NetBox.Servers {
+				if strings.EqualFold(server.Name, serverFilter) {
+					serversToSync = []config.NetBoxServer{server}
+					break
+				}
+			}
+			if serversToSync == nil {
+				return nil, fmt.Errorf("no configured NetBox server named %q", serverFilter)
+			}
+		}
 		var services []netbox.Service
-		for _, server := range configuration.NetBox.Servers {
+		for _, server := range serversToSync {
 			token, err := credentials.TokenFor(server.Name)
 			if err != nil {
 				return nil, err
@@ -116,30 +129,47 @@ func newRootCommand(deps dependencies) *cobra.Command {
 			services = append(services, serverServices...)
 		}
 		services = filterServices(services, configuration.Services.Enabled)
+		// When syncing a single server, keep other servers' cached services intact.
+		if serverFilter != "" {
+			if existing, err := (cache.Store{Path: serviceCachePath}).Read(); err == nil {
+				for _, service := range existing.Services {
+					if !strings.EqualFold(service.Server, serverFilter) {
+						services = append(services, service)
+					}
+				}
+			}
+		}
 		if err := (cache.Store{Path: serviceCachePath}).Write(services, deps.now()); err != nil {
 			return nil, err
 		}
 		return services, nil
 	}
 
-	syncServices := func(command *cobra.Command, debug bool) error {
+	syncServices := func(command *cobra.Command, debug bool, serverFilter string) error {
 		var debugOutput io.Writer
 		if debug {
 			debugOutput = command.ErrOrStderr()
 		}
-		services, err := refreshServices(command.Context(), debugOutput)
+		services, err := refreshServices(command.Context(), debugOutput, serverFilter)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintln(command.OutOrStdout(), "Connected to NetBox")
+		if serverFilter != "" {
+			services = filterServicesByServer(services, serverFilter)
+		}
 		fmt.Fprintf(command.OutOrStdout(), "Found %d services\nCache updated\n", len(services))
 		return nil
 	}
 
 	syncCommand := &cobra.Command{
-		Use: "sync", Short: "Synchronize services from NetBox",
+		Use: "sync [server]", Short: "Synchronize services from NetBox", Args: cobra.MaximumNArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			return syncServices(command, debugAPI)
+			var serverFilter string
+			if len(args) > 0 {
+				serverFilter = args[0]
+			}
+			return syncServices(command, debugAPI, serverFilter)
 		},
 	}
 	syncCommand.Flags().BoolVar(&debugAPI, "debug-api", false, "print NetBox API requests and response bodies to stderr")
@@ -157,7 +187,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 				return err
 			}
 			if refresh {
-				if err := syncServices(command, connectDebugAPI); err != nil {
+				if err := syncServices(command, connectDebugAPI, ""); err != nil {
 					return err
 				}
 			}
@@ -168,7 +198,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 
 			services := filterServicesByServer(snapshot.Services, serverName)
 			selection, err := selectService(command.Context(), services, target, serviceName, endpoint, configuration.Ping.Count, func(ctx context.Context) ([]netbox.Service, error) {
-				return refreshServices(ctx, nil)
+				return refreshServices(ctx, nil, "")
 			})
 			if err != nil {
 				return ignoreSelectionCancellation(err)
