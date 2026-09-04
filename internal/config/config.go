@@ -24,8 +24,9 @@ type NetBoxConfig struct {
 }
 
 type NetBoxServer struct {
-	Name string `yaml:"name"`
-	URL  string `yaml:"url"`
+	Name string     `yaml:"name"`
+	URL  string     `yaml:"url"`
+	SSH  *SSHConfig `yaml:"ssh,omitempty"`
 }
 
 type ServicesConfig struct {
@@ -139,7 +140,35 @@ func Load(path string) (Config, error) {
 		raw.SSH.Keys[user] = key
 	}
 
+	for index := range servers {
+		if servers[index].SSH == nil {
+			continue
+		}
+		for user, key := range servers[index].SSH.Keys {
+			key.IdentityFile, err = expandHome(key.IdentityFile)
+			if err != nil {
+				return Config{}, fmt.Errorf("expand netbox.servers[%d].ssh.keys.%s.identity_file: %w", index, user, err)
+			}
+			servers[index].SSH.Keys[user] = key
+		}
+	}
+
 	return Config{NetBox: NetBoxConfig{Servers: servers}, Services: raw.Services, SSH: raw.SSH, Cache: CacheConfig{TTL: ttl}, Ping: PingConfig{Count: pingCount}}, nil
+}
+
+// SSHFor returns the SSH configuration effective for the named NetBox server.
+// A server with its own ssh block uses only that block; servers without one
+// fall back to the global ssh configuration. Matching is case-insensitive.
+func (config Config) SSHFor(serverName string) SSHConfig {
+	for _, server := range config.NetBox.Servers {
+		if strings.EqualFold(strings.TrimSpace(server.Name), strings.TrimSpace(serverName)) {
+			if server.SSH != nil {
+				return *server.SSH
+			}
+			break
+		}
+	}
+	return config.SSH
 }
 
 func expandHome(path string) (string, error) {

@@ -6,6 +6,13 @@ netbox:
   servers:
     - name: production
       url: https://netbox.example.com
+      # Optional per-server SSH settings. When present, this block fully
+      # replaces the global ssh block below for this server only.
+      # ssh:
+      #   default_user: prod-admin
+      #   keys:
+      #     prod-admin:
+      #       identity_file: ~/.ssh/id_prod_admin
 
 services:
   # Only these NetBox service names are cached and shown by nbcon.
@@ -15,6 +22,7 @@ services:
     # - telnet
 
 ssh:
+  # Global SSH settings, used by every NetBox server without its own ssh block.
   # Used by the SSH connector for matching NetBox SSH services.
   default_user: admin
   keys:

@@ -266,8 +266,9 @@ func connectionCommandFor(selection launcher.Selection, configuration config.Con
 	if strings.EqualFold(strings.TrimSpace(selection.Service.Name), "telnet") {
 		return connector.Telnet(selection.Service, selection.Endpoint)
 	}
-	identityFile := configuration.SSH.Keys[configuration.SSH.DefaultUser].IdentityFile
-	return connector.SSH(selection.Service, selection.Endpoint, configuration.SSH.DefaultUser, identityFile)
+	ssh := configuration.SSHFor(selection.Service.Server)
+	identityFile := ssh.Keys[ssh.DefaultUser].IdentityFile
+	return connector.SSH(selection.Service, selection.Endpoint, ssh.DefaultUser, identityFile)
 }
 
 func selectService(ctx context.Context, services []netbox.Service, serverFilter, target, serviceName, endpoint string, pingCount int, syncServices launcher.SyncServices) (launcher.Selection, error) {

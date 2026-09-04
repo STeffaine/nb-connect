@@ -87,6 +87,29 @@ ssh:
 
 `nbcon` expands `~/...` and passes the configured key to `ssh -i` for the matching user.
 
+To use different SSH credentials for one NetBox server, add an `ssh` block to that server. A server with its own `ssh` block uses only that block; all other servers fall back to the global `ssh` settings.
+
+```yaml
+netbox:
+	servers:
+		- name: production
+			url: https://netbox.example.com
+			ssh:
+				default_user: prod-admin
+				keys:
+					prod-admin:
+						identity_file: ~/.ssh/id_prod_admin
+		- name: lab
+			url: https://netbox-lab.example.com
+			# No ssh block: uses the global ssh settings below.
+
+ssh:
+	default_user: admin
+	keys:
+		admin:
+			identity_file: ~/.ssh/id_admin
+```
+
 Use `--dry-run` to print the connection invocation without opening a session. Services with more than one endpoint require an explicit endpoint.
 
 ```sh
