@@ -4,6 +4,8 @@
 
 ## Installation
 
+### Manual Build
+
 Clone, build, and install `nbcon`, then copy the configuration templates:
 
 ```sh
@@ -26,6 +28,44 @@ export PATH="$HOME/.local/bin:$PATH"
 ```
 
 Add the `PATH` export to your shell profile when `~/.local/bin` is not already on `PATH`.
+
+### NixOS Flake
+
+Install `nbcon` system-wide on NixOS using the included flake:
+
+**As a package:**
+```sh
+nix profile install github:STeffaine/nb-connect
+```
+
+**In a NixOS configuration (flake):**
+
+Add to your system flake inputs:
+```nix
+inputs.nbcon.url = "github:STeffaine/nb-connect";
+```
+
+Add to your system flake outputs (with `nbcon` in specialArgs):
+```nix
+specialArgs = { inherit inputs; };
+```
+
+Import the module in your `configuration.nix`:
+```nix
+imports = [ "${inputs.nbcon}/nixos-module.nix" ];
+```
+
+Then rebuild your system:
+```sh
+sudo nixos-rebuild switch --flake .#your-hostname
+```
+
+**For development:**
+```sh
+nix develop
+go build -o nbcon ./cmd/nbcon
+```
+
 
 ### Multiple NetBox servers
 
