@@ -303,7 +303,7 @@ func TestRunRootWithServerArgDryRunBuildsSSHCommand(t *testing.T) {
 }
 
 func TestSelectServiceRequiresBothExplicitSelectors(t *testing.T) {
-	_, err := selectService(context.Background(), nil, "", "router-01", "", "", 4, nil)
+	_, err := selectService(context.Background(), nil, "", "router-01", "", "", 4, true, nil)
 	if err == nil || !strings.Contains(err.Error(), "must be used together") {
 		t.Fatalf("selectService() error = %v", err)
 	}

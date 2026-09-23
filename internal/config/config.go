@@ -17,6 +17,7 @@ type Config struct {
 	SSH      SSHConfig      `yaml:"ssh"`
 	Cache    CacheConfig    `yaml:"cache"`
 	Ping     PingConfig     `yaml:"ping"`
+	Launcher LauncherConfig `yaml:"launcher"`
 }
 
 type NetBoxConfig struct {
@@ -50,11 +51,18 @@ type PingConfig struct {
 	Count int `yaml:"count"`
 }
 
+type LauncherConfig struct {
+	InfoPanelOpenByDefault bool `yaml:"info_panel_open_by_default"`
+}
+
 type rawConfig struct {
 	NetBox   NetBoxConfig   `yaml:"netbox"`
 	Services ServicesConfig `yaml:"services"`
 	SSH      SSHConfig      `yaml:"ssh"`
 	Ping     PingConfig     `yaml:"ping"`
+	Launcher struct {
+		InfoPanelOpenByDefault *bool `yaml:"info_panel_open_by_default"`
+	} `yaml:"launcher"`
 	Cache    struct {
 		TTL string `yaml:"ttl"`
 	} `yaml:"cache"`
@@ -131,6 +139,10 @@ func Load(path string) (Config, error) {
 	if pingCount < 1 {
 		return Config{}, errors.New("ping.count must be greater than zero")
 	}
+	launcherInfoPanelOpenByDefault := true
+	if raw.Launcher.InfoPanelOpenByDefault != nil {
+		launcherInfoPanelOpenByDefault = *raw.Launcher.InfoPanelOpenByDefault
+	}
 
 	for user, key := range raw.SSH.Keys {
 		key.IdentityFile, err = expandHome(key.IdentityFile)
@@ -153,7 +165,7 @@ func Load(path string) (Config, error) {
 		}
 	}
 
-	return Config{NetBox: NetBoxConfig{Servers: servers}, Services: raw.Services, SSH: raw.SSH, Cache: CacheConfig{TTL: ttl}, Ping: PingConfig{Count: pingCount}}, nil
+	return Config{NetBox: NetBoxConfig{Servers: servers}, Services: raw.Services, SSH: raw.SSH, Cache: CacheConfig{TTL: ttl}, Ping: PingConfig{Count: pingCount}, Launcher: LauncherConfig{InfoPanelOpenByDefault: launcherInfoPanelOpenByDefault}}, nil
 }
 
 // SSHFor returns the SSH configuration effective for the named NetBox server.

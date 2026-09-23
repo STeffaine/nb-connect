@@ -175,6 +175,15 @@ ping:
 	count: 2
 ```
 
+### Info panel
+
+Control whether the service information panel opens automatically when there is enough screen space with `launcher.info_panel_open_by_default`. Set it to `false` if you want the selector to start closed and only open the panel when you press `i`:
+
+```yaml
+launcher:
+	info_panel_open_by_default: false
+```
+
 ### API debugging
 
 Use `sync --debug-api` to write each NetBox request URL, response status, and raw response body to standard error. Authorization headers and tokens are never printed.

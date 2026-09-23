@@ -21,8 +21,8 @@ var ErrSelectionCancelled = errors.New("service selection cancelled")
 
 type SyncServices func(context.Context) ([]netbox.Service, error)
 
-func Select(ctx context.Context, services []netbox.Service, serverFilter string, pingCount int, syncServices SyncServices) (Selection, error) {
-	selector, err := newModelWithPingCount(ctx, services, pingCount, syncServices, serverFilter)
+func Select(ctx context.Context, services []netbox.Service, serverFilter string, pingCount int, infoPanelOpenByDefault bool, syncServices SyncServices) (Selection, error) {
+	selector, err := newModelWithPingCountAndSettings(ctx, services, pingCount, infoPanelOpenByDefault, syncServices, serverFilter)
 	if err != nil {
 		return Selection{}, err
 	}
@@ -66,6 +66,10 @@ type model struct {
 	width                int
 	height               int
 	selection            *Selection
+	infoOpen             bool
+	infoOverlay          bool
+	infoManual           bool
+	infoPanelOpenByDefault bool
 	cancelled            bool
 	favorites            map[string]bool
 	recents              []string
@@ -78,14 +82,18 @@ type syncResult struct {
 }
 
 func newModel(ctx context.Context, services []netbox.Service, syncServices SyncServices) (model, error) {
-	return newModelWithPingCount(ctx, services, 4, syncServices, "")
+	return newModelWithPingCountAndSettings(ctx, services, 4, true, syncServices, "")
 }
 
 func newModelWithServerFilter(ctx context.Context, services []netbox.Service, serverFilter string, syncServices SyncServices) (model, error) {
-	return newModelWithPingCount(ctx, services, 4, syncServices, serverFilter)
+	return newModelWithPingCountAndSettings(ctx, services, 4, true, syncServices, serverFilter)
 }
 
 func newModelWithPingCount(ctx context.Context, services []netbox.Service, pingCount int, syncServices SyncServices, serverFilter string) (model, error) {
+	return newModelWithPingCountAndSettings(ctx, services, pingCount, true, syncServices, serverFilter)
+}
+
+func newModelWithPingCountAndSettings(ctx context.Context, services []netbox.Service, pingCount int, infoPanelOpenByDefault bool, syncServices SyncServices, serverFilter string) (model, error) {
 	choices, err := choicesForServices(services)
 	if err != nil {
 		return model{}, err
@@ -108,7 +116,7 @@ func newModelWithPingCount(ctx context.Context, services []netbox.Service, pingC
 		}
 		filters.toggle(filterServer, canonicalServer)
 	}
-	return model{choices: choices, choiceSearch: choiceSearchIndex(choices), context: ctx, filter: filter, filters: filters, sync: syncServices, pingCount: pingCount, favorites: favorites, recents: recents, statePath: statePath}, nil
+	return model{choices: choices, choiceSearch: choiceSearchIndex(choices), context: ctx, filter: filter, filters: filters, sync: syncServices, pingCount: pingCount, favorites: favorites, recents: recents, statePath: statePath, infoPanelOpenByDefault: infoPanelOpenByDefault}, nil
 }
 
 func (model model) Init() tea.Cmd {
@@ -120,6 +128,13 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		model.width = message.Width
 		model.height = message.Height
+		if !model.infoManual {
+			model.infoOpen = model.infoPanelOpenByDefault && model.canDockInfoPanel()
+			model.infoOverlay = false
+		} else if model.infoOpen && !model.canDockInfoPanel() {
+			model.infoOpen = false
+			model.infoOverlay = true
+		}
 		return model, nil
 	case pingMessage:
 		return model.updatePing(message)
@@ -207,16 +222,41 @@ func (model model) updateSearchKey(message tea.KeyMsg) (model, tea.Cmd) {
 }
 
 func (model model) updateBrowseKey(message tea.KeyMsg) (model, tea.Cmd) {
+	if model.infoOverlay {
+		switch message.String() {
+		case "ctrl+c", "esc", "q", "i":
+			model.infoOverlay = false
+			return model, nil
+		case "enter":
+			return model.selectChoice(model.cursor)
+		}
+		return model, nil
+	}
 	if shortcutIndex, ok := numberShortcut(message.String()); ok {
 		return model.selectChoice(shortcutIndex)
 	}
 	switch message.String() {
 	case "ctrl+c", "esc", "q":
+		if model.infoOpen {
+			model.infoOpen = false
+			model.infoManual = true
+			return model, nil
+		}
 		model.cancelled = true
 		return model, tea.Quit
 	case "/":
 		model.searching = true
 		return model, model.filter.Focus()
+	case "i":
+		if model.canDockInfoPanel() {
+			model.infoOpen = !model.infoOpen
+			model.infoOverlay = false
+		} else {
+			model.infoOverlay = !model.infoOverlay
+			model.infoOpen = false
+		}
+		model.infoManual = true
+		return model, nil
 	case "f":
 		model.filtering = true
 		model.filterSearching = false

@@ -37,3 +37,7 @@ cache:
 ping:
   # Number of ICMP echo requests sent by the TUI ping action.
   count: 4
+
+launcher:
+  # Open the info panel by default when the screen is wide enough.
+  info_panel_open_by_default: true

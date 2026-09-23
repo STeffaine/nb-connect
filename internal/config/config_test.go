@@ -9,7 +9,7 @@ import (
 )
 
 func TestLoad(t *testing.T) {
-	path := writeFile(t, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: \" https://netbox.example.test/ \"\nservices:\n  enabled: [sshd, https]\nssh:\n  default_user: ops\n  keys:\n    ops:\n      identity_file: /home/ops/.ssh/id_ops\ncache:\n  ttl: 30m\nping:\n  count: 2\n")
+	path := writeFile(t, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: \" https://netbox.example.test/ \"\nservices:\n  enabled: [sshd, https]\nssh:\n  default_user: ops\n  keys:\n    ops:\n      identity_file: /home/ops/.ssh/id_ops\ncache:\n  ttl: 30m\nping:\n  count: 2\nlauncher:\n  info_panel_open_by_default: false\n")
 
 	configuration, err := Load(path)
 	if err != nil {
@@ -30,6 +30,9 @@ func TestLoad(t *testing.T) {
 	if configuration.Ping.Count != 2 {
 		t.Fatalf("Ping.Count = %d", configuration.Ping.Count)
 	}
+	if configuration.Launcher.InfoPanelOpenByDefault {
+		t.Fatal("Launcher.InfoPanelOpenByDefault = true, want false")
+	}
 	if strings.Join(configuration.Services.Enabled, ",") != "sshd,https" {
 		t.Fatalf("Enabled = %v", configuration.Services.Enabled)
 	}
@@ -49,6 +52,20 @@ func TestLoadUsesDefaultTTL(t *testing.T) {
 	}
 	if configuration.Ping.Count != 4 {
 		t.Fatalf("Ping.Count = %d", configuration.Ping.Count)
+	}
+	if !configuration.Launcher.InfoPanelOpenByDefault {
+		t.Fatal("Launcher.InfoPanelOpenByDefault = false, want true")
+	}
+}
+
+func TestLoadLauncherDefaults(t *testing.T) {
+	path := writeFile(t, "config.yaml", "netbox:\n  servers:\n    - name: production\n      url: https://netbox.example.test\n")
+	configuration, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configuration.Launcher.InfoPanelOpenByDefault {
+		t.Fatal("Launcher.InfoPanelOpenByDefault = false, want true")
 	}
 }
 

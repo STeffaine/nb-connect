@@ -155,6 +155,190 @@ func TestModelViewShowsCompactAlignedColumnsAndSelectedDetails(t *testing.T) {
 	}
 }
 
+func TestModelOpensInfoPanelByDefaultWhenWideEnough(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{
+		Server: "production",
+		Device: "router-01",
+		VM: "router-vm-01",
+		Name: "sshd",
+		Protocol: "tcp",
+		Ports: []int{22, 2222},
+		IPs: []string{"192.0.2.10", "192.0.2.11"},
+		Site: "dc1",
+		Role: "Router",
+		Tenant: "Operations",
+		Platform: "Linux",
+		Tags: []string{"core", "edge"},
+		Description: "Edge router",
+		Status: "active",
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := selector.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
+	selector = updated.(model)
+	if !selector.infoOpen || selector.infoOverlay {
+		t.Fatalf("wide viewport should open docked info panel: %#v", selector)
+	}
+	view := stripANSI(selector.View())
+	for _, want := range []string{"TARGET", "Service information", "server: production", "target: router-01", "ports: 22, 2222", "favorite: no"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("split info panel missing %q: %q", want, view)
+		}
+	}
+}
+
+func TestModelKeepsDockedInfoPanelWidthStableAcrossSelectionChanges(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{
+		{
+			Server: "production",
+			Device: "router-01-long-name",
+			Name: "sshd",
+			Protocol: "tcp",
+			Ports: []int{22},
+			IPs: []string{"192.0.2.10"},
+			Description: "primary transit gateway",
+		},
+		{
+			Server: "production",
+			Device: "r2",
+			Name: "https",
+			Protocol: "tcp",
+			Ports: []int{443},
+			IPs: []string{"192.0.2.11"},
+			Description: "web",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := selector.Update(tea.WindowSizeMsg{Width: 180, Height: 24})
+	selector = updated.(model)
+	if !selector.infoOpen || selector.infoOverlay {
+		t.Fatalf("wide viewport should dock info panel: %#v", selector)
+	}
+	view := stripANSI(selector.View())
+	title := rowLine(t, view, "Service information")
+	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyDown})
+	selector = updated.(model)
+	viewAfter := stripANSI(selector.View())
+	titleAfter := rowLine(t, viewAfter, "Service information")
+	if len(title) != len(titleAfter) {
+		t.Fatalf("docked panel width changed: before=%d after=%d", len(title), len(titleAfter))
+	}
+}
+
+func TestModelKeepsDockedInfoPanelHeightStableAcrossSelectionChanges(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{
+		{
+			Server: "production",
+			Device: "router-01",
+			Name: "sshd",
+			Protocol: "tcp",
+			Ports: []int{22},
+			IPs: []string{"192.0.2.10"},
+			Description: strings.Repeat("primary transit gateway ", 4),
+		},
+		{
+			Server: "production",
+			Device: "r2",
+			Name: "https",
+			Protocol: "tcp",
+			Ports: []int{443},
+			IPs: []string{"192.0.2.11"},
+			Description: "web",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := selector.Update(tea.WindowSizeMsg{Width: 180, Height: 30})
+	selector = updated.(model)
+	if !selector.infoOpen || selector.infoOverlay {
+		t.Fatalf("wide viewport should dock info panel: %#v", selector)
+	}
+	view := stripANSI(selector.View())
+	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyDown})
+	selector = updated.(model)
+	viewAfter := stripANSI(selector.View())
+	if got, want := len(strings.Split(view, "\n")), len(strings.Split(viewAfter, "\n")); got != want {
+		t.Fatalf("docked panel height changed: before=%d after=%d", got, want)
+	}
+}
+
+func TestModelDoesNotDockInfoPanelWhenItWouldTruncateList(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{
+		Server: "production",
+		Device: strings.Repeat("router-", 5) + "01",
+		Name: strings.Repeat("service-", 4) + "ssh",
+		Protocol: "tcp",
+		Ports: []int{22, 2222},
+		IPs: []string{strings.Repeat("192.0.2.", 3) + "10"},
+		Description: strings.Repeat("long description ", 4),
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := selector.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
+	selector = updated.(model)
+	if selector.infoOpen || selector.infoOverlay {
+		t.Fatalf("panel should not dock when it would truncate the list: %#v", selector)
+	}
+	view := stripANSI(selector.View())
+	if strings.Contains(view, "Service information") {
+		t.Fatalf("unexpected docked info panel in narrow split: %q", view)
+	}
+	if !strings.Contains(view, "i info") {
+		t.Fatalf("browse footer should still advertise info panel: %q", view)
+	}
+}
+
+func TestModelShowsInfoPanelOverlayAndConnectsFromNarrowViewport(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{
+		Device: "router-01",
+		Name: "sshd",
+		IPs: []string{"192.0.2.10"},
+		Ports: []int{22},
+		Description: "Edge router",
+	}, {
+		Device: "router-02",
+		Name: "sshd",
+		IPs: []string{"192.0.2.11"},
+		Ports: []int{22},
+		Description: "Backup router",
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := selector.Update(tea.WindowSizeMsg{Width: 52, Height: 18})
+	selector = updated.(model)
+	if selector.infoOpen || selector.infoOverlay {
+		t.Fatalf("narrow viewport should not auto-open info panel: %#v", selector)
+	}
+	selector.cursor = 1
+	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	selector = updated.(model)
+	if !selector.infoOverlay || selector.infoOpen {
+		t.Fatalf("narrow viewport should open overlay info panel: %#v", selector)
+	}
+	view := stripANSI(selector.View())
+	if strings.Contains(view, "TARGET") || !strings.Contains(view, "Service information") {
+		t.Fatalf("overlay should hide the list and show info: %q", view)
+	}
+	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	selector = updated.(model)
+	if selector.infoOverlay {
+		t.Fatalf("i should close the overlay: %#v", selector)
+	}
+	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	selector = updated.(model)
+	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	selected := updated.(model).selection
+	if command == nil || selected == nil || selected.Service.TargetName() != "router-02" {
+		t.Fatalf("overlay enter should connect to hovered entry: selection=%#v command=%v", selected, command)
+	}
+}
+
 func TestModelResizesListToTerminalViewport(t *testing.T) {
 	services := make([]netbox.Service, 0, 12)
 	for index := range 12 {
