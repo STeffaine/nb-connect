@@ -41,7 +41,7 @@ func TestModelSearchesFiltersAndSelectsService(t *testing.T) {
 	}
 }
 
-func TestModelEscClearsSearchBeforeCancelling(t *testing.T) {
+func TestModelEscCancelsFromSearchMode(t *testing.T) {
 	selector, err := newModel(context.Background(), []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -49,10 +49,10 @@ func TestModelEscClearsSearchBeforeCancelling(t *testing.T) {
 	selector.searching = true
 	selector.filter.Focus()
 	selector.filter.SetValue("router")
-	updated, _ := selector.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	selector = updated.(model)
-	if selector.searching || selector.filter.Value() != "" || selector.cancelled {
-		t.Fatalf("Esc in search mode = %#v", selector)
+	if !selector.cancelled || command == nil {
+		t.Fatalf("Esc in search mode should cancel = %#v, command=%v", selector, command)
 	}
 }
 
@@ -434,10 +434,10 @@ func TestModelPingsSelectedEndpoint(t *testing.T) {
 	if view := stripANSI(selector.View()); !strings.Contains(view, "Ping results") {
 		t.Fatalf("view does not retain ping results popup: %q", view)
 	}
-	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	selector = updated.(model)
 	if selector.networkOverlay || selector.pinging || selector.tracing {
-		t.Fatalf("network overlay did not close on Esc: %#v", selector)
+		t.Fatalf("network overlay did not close on q: %#v", selector)
 	}
 }
 
@@ -476,7 +476,7 @@ func TestModelShowsPingPopupOverSplitInfoPanel(t *testing.T) {
 	}
 }
 
-func TestModelClosingNetworkOverlayStopsRunningCommands(t *testing.T) {
+func TestModelClosingNetworkOverlayStopsRunningCommandsOnQ(t *testing.T) {
 	selector, err := newModel(context.Background(), []netbox.Service{{
 		Device: "router-01",
 		Name: "sshd",
@@ -491,7 +491,7 @@ func TestModelClosingNetworkOverlayStopsRunningCommands(t *testing.T) {
 	if !selector.networkOverlay || !selector.pinging || !selector.tracing {
 		t.Fatalf("network overlay did not start: %#v", selector)
 	}
-	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	selector = updated.(model)
 	if selector.networkOverlay || selector.pinging || selector.tracing {
 		t.Fatalf("network overlay did not stop active commands: %#v", selector)
@@ -609,15 +609,30 @@ func TestModelSyncReportsUnavailableAndFailedSync(t *testing.T) {
 	}
 }
 
-func TestModelCancelsFromBrowseMode(t *testing.T) {
+func TestModelQReturnsHomeFromBrowseMode(t *testing.T) {
 	selector, err := newModel(context.Background(), []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	selector.searching = true
+	selector.filter.SetValue("router")
+	selector.filter.Focus()
 	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	selector = updated.(model)
+	if selector.cancelled || command != nil || selector.searching || selector.filter.Value() != "" {
+		t.Fatalf("q should return home without quitting: %#v, command=%v", selector, command)
+	}
+}
+
+func TestModelEscCancelsFromBrowseMode(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	selector = updated.(model)
 	if !selector.cancelled || command == nil {
-		t.Fatalf("browse cancellation = %#v, command=%v", selector, command)
+		t.Fatalf("browse Esc cancellation = %#v, command=%v", selector, command)
 	}
 }
 

@@ -130,11 +130,11 @@ func (model model) renderListView() string {
 		}
 	}
 	if model.searching {
-		output.WriteString("\nEnter apply | Esc clear and return\n")
+		output.WriteString("\nEnter apply | q home | Esc quit\n")
 	} else {
-		footer := "\n1-9 connect | Enter connect | m favorite | l last used | p ping | i info | / search | f filters | s sync | j/k or arrows move | Esc cancel\n"
+		footer := "\n1-9 connect | Enter connect | m favorite | l last used | p ping | i info | / search | f filters | s sync | j/k or arrows move | q home | Esc quit\n"
 		if model.infoOpen {
-			footer = "\n1-9 connect | Enter connect | m favorite | l last used | p ping | i close | / search | f filters | s sync | j/k or arrows move | Esc close\n"
+			footer = "\n1-9 connect | Enter connect | m favorite | l last used | p ping | i close | / search | f filters | s sync | j/k or arrows move | q home | Esc quit\n"
 		}
 		output.WriteString(footer)
 	}
@@ -175,14 +175,14 @@ func (model model) writeFilterMenu(output *strings.Builder) {
 		fmt.Fprintf(output, "%s[%s] %s\n", prefix, marker, option)
 	}
 	if model.filterSearching {
-		output.WriteString("\nType to search | arrows move | Space select more | Enter select | Esc clear\n")
+		output.WriteString("\nType to search | arrows move | Space select more | Enter select | q home | Esc quit\n")
 		return
 	}
 	if model.filterOptionsFocused {
-		output.WriteString("\nTab filters | / search values | j/k or arrows move | Space/Enter select | a all/any | Esc close\n")
+		output.WriteString("\nTab filters | / search values | j/k or arrows move | Space/Enter select | a all/any | q home | Esc quit\n")
 		return
 	}
-	output.WriteString("\nTab options | j/k or arrows category | / search values | a all/any | Esc close\n")
+	output.WriteString("\nTab options | j/k or arrows category | / search values | a all/any | q home | Esc quit\n")
 }
 
 func (model model) renderNetworkOverlay() string {
@@ -219,7 +219,7 @@ func (model model) renderNetworkOverlay() string {
 	rightPanel := networkPanelBoxLines(traceTitle, traceLines, rightWidth, panelHeight)
 	rows := combineColumns(leftPanel, rightPanel, leftWidth, splitGap)
 	rows = append(rows, "")
-	rows = append(rows, "p or Esc close | Ctrl+C cancel")
+	rows = append(rows, "q or p close | Esc quit | Ctrl+C quit")
 	return strings.Join(rows, "\n")
 }
 
@@ -411,7 +411,7 @@ func (model model) renderInfoOverlay() string {
 		output.WriteString(line)
 		output.WriteString("\n")
 	}
-	output.WriteString("\ni close | Enter connect | Esc close\n")
+	output.WriteString("\ni close | q close | Enter connect | Esc quit\n")
 	return output.String()
 }
 
@@ -528,15 +528,15 @@ func (model model) renderListBody(width int, includeDetails bool, fixedColumns b
 
 func (model model) renderFooter() string {
 	if model.searching {
-		return "\nEnter apply | Esc clear and return\n"
+		return "\nEnter apply | q home | Esc quit\n"
 	}
 	if model.infoOverlay {
-		return "\ni close | Enter connect | Esc close\n"
+		return "\ni close | q close | Enter connect | Esc quit\n"
 	}
 	if model.infoOpen {
-		return "\n1-9 connect | Enter connect | m favorite | l last used | p ping | i close | / search | f filters | s sync | j/k or arrows move | Esc close\n"
+		return "\n1-9 connect | Enter connect | m favorite | l last used | p ping | i close | / search | f filters | s sync | j/k or arrows move | q home | Esc quit\n"
 	}
-	return "\n1-9 connect | Enter connect | m favorite | l last used | p ping | i info | / search | f filters | s sync | j/k or arrows move | Esc cancel\n"
+	return "\n1-9 connect | Enter connect | m favorite | l last used | p ping | i info | / search | f filters | s sync | j/k or arrows move | q home | Esc quit\n"
 }
 
 func (model model) canDockInfoPanel() bool {

@@ -222,6 +222,14 @@ func (model model) updateSync(message syncResult) (model, tea.Cmd) {
 }
 
 func (model model) updateKey(message tea.KeyMsg) (model, tea.Cmd) {
+	if model.isQuitKey(message.String()) {
+		model = model.closeNetworkOverlay()
+		model.cancelled = true
+		return model, tea.Quit
+	}
+	if message.String() == "q" {
+		return model.returnHome(), nil
+	}
 	if model.filtering {
 		return model.updateFilterKey(message)
 	}
@@ -233,15 +241,6 @@ func (model model) updateKey(message tea.KeyMsg) (model, tea.Cmd) {
 
 func (model model) updateSearchKey(message tea.KeyMsg) (model, tea.Cmd) {
 	switch message.String() {
-	case "ctrl+c":
-		model.cancelled = true
-		return model, tea.Quit
-	case "esc":
-		model.filter.SetValue("")
-		model.filter.Blur()
-		model.searching = false
-		model.cursor = 0
-		return model, nil
 	case "enter":
 		model.filter.Blur()
 		model.searching = false
@@ -258,11 +257,7 @@ func (model model) updateSearchKey(message tea.KeyMsg) (model, tea.Cmd) {
 func (model model) updateBrowseKey(message tea.KeyMsg) (model, tea.Cmd) {
 	if model.networkOverlay {
 		switch message.String() {
-		case "ctrl+c":
-			model = model.closeNetworkOverlay()
-			model.cancelled = true
-			return model, tea.Quit
-		case "esc", "q", "p":
+		case "q", "p":
 			model = model.closeNetworkOverlay()
 			return model, nil
 		}
@@ -270,7 +265,7 @@ func (model model) updateBrowseKey(message tea.KeyMsg) (model, tea.Cmd) {
 	}
 	if model.infoOverlay {
 		switch message.String() {
-		case "ctrl+c", "esc", "q", "i":
+		case "q", "i":
 			model.infoOverlay = false
 			return model, nil
 		case "enter":
@@ -282,14 +277,6 @@ func (model model) updateBrowseKey(message tea.KeyMsg) (model, tea.Cmd) {
 		return model.selectChoice(shortcutIndex)
 	}
 	switch message.String() {
-	case "ctrl+c", "esc", "q":
-		if model.infoOpen {
-			model.infoOpen = false
-			model.infoManual = true
-			return model, nil
-		}
-		model.cancelled = true
-		return model, tea.Quit
 	case "/":
 		model.searching = true
 		return model, model.filter.Focus()
@@ -361,6 +348,26 @@ func (model model) closeNetworkOverlay() model {
 	model.pinging = false
 	model.tracing = false
 	return model
+}
+
+func (model model) returnHome() model {
+	model = model.closeNetworkOverlay()
+	model.searching = false
+	model.filter.SetValue("")
+	model.filter.Blur()
+	model.filtering = false
+	model.filterSearching = false
+	model.filterMenuSearch.SetValue("")
+	model.filterMenuSearch.Blur()
+	model.filterOptionsFocused = false
+	model.filterCursor = 0
+	model.infoOverlay = false
+	model.cursor = 0
+	return model
+}
+
+func (model model) isQuitKey(key string) bool {
+	return key == "ctrl+c" || key == "esc"
 }
 
 func (model model) currentChoice() (Selection, bool) {

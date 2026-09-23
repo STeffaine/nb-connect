@@ -100,15 +100,6 @@ func filterValue(selection Selection, category filterCategory) string {
 func (model model) updateFilterKey(message tea.KeyMsg) (model, tea.Cmd) {
 	if model.filterSearching {
 		switch message.String() {
-		case "ctrl+c":
-			model.cancelled = true
-			return model, tea.Quit
-		case "esc":
-			model.filterMenuSearch.SetValue("")
-			model.filterMenuSearch.Blur()
-			model.filterSearching = false
-			model.filterCursor = 0
-			return model, nil
 		case "up":
 			if model.filterCursor > 0 {
 				model.filterCursor--
@@ -141,14 +132,6 @@ func (model model) updateFilterKey(message tea.KeyMsg) (model, tea.Cmd) {
 
 	options := model.filterOptions()
 	switch message.String() {
-	case "ctrl+c":
-		model.cancelled = true
-		return model, tea.Quit
-	case "esc":
-		model.filterMenuSearch.Blur()
-		model.filtering = false
-		model.cursor = 0
-		return model, nil
 	case "/":
 		model.filterSearching = true
 		model.filterOptionsFocused = true
