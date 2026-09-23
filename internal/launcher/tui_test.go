@@ -636,6 +636,100 @@ func TestModelEscCancelsFromBrowseMode(t *testing.T) {
 	}
 }
 
+func TestModelQDoesNotCancelFromMainPage(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	selector = updated.(model)
+	if selector.cancelled || command != nil {
+		t.Fatalf("q on main page should not quit: %#v, command=%v", selector, command)
+	}
+}
+
+func TestModelQDoesNotCloseSplitInfoPanel(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{
+		Server: "production",
+		Device: "router-01",
+		Name:   "sshd",
+		IPs:    []string{"192.0.2.10"},
+		Ports:  []int{22},
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := selector.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
+	selector = updated.(model)
+	if !selector.infoOpen || selector.infoOverlay {
+		t.Fatalf("expected split info panel open: %#v", selector)
+	}
+	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	selector = updated.(model)
+	if selector.cancelled || command != nil || !selector.infoOpen || selector.infoOverlay {
+		t.Fatalf("q should keep split info open and not quit: %#v, command=%v", selector, command)
+	}
+}
+
+func TestModelQClosesFilterMenuWithoutQuitting(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector.filtering = true
+	selector.filterSearching = true
+	selector.filterMenuSearch.SetValue("router")
+	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	selector = updated.(model)
+	if selector.cancelled || command != nil || selector.filtering || selector.filterSearching {
+		t.Fatalf("q should close filter menu without quitting: %#v, command=%v", selector, command)
+	}
+}
+
+func TestModelEscQuitsFromOverlayAndFilterModes(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(model) model
+	}{
+		{
+			name: "info overlay",
+			setup: func(m model) model {
+				m.infoOverlay = true
+				return m
+			},
+		},
+		{
+			name: "filter menu",
+			setup: func(m model) model {
+				m.filtering = true
+				return m
+			},
+		},
+		{
+			name: "search mode",
+			setup: func(m model) model {
+				m.searching = true
+				return m
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			selector, err := newModel(context.Background(), []netbox.Service{{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			selector = test.setup(selector)
+			updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			selector = updated.(model)
+			if !selector.cancelled || command == nil {
+				t.Fatalf("esc should quit from %s: %#v, command=%v", test.name, selector, command)
+			}
+		})
+	}
+}
+
 func rowLine(t *testing.T, view, contains string) string {
 	t.Helper()
 	for _, line := range strings.Split(view, "\n") {
