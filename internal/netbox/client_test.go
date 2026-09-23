@@ -160,6 +160,33 @@ func TestServicesCachesParentMetadata(t *testing.T) {
 	}
 }
 
+func TestServicesDecodesStringDescriptionMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/dcim/devices/1/" {
+			_, _ = response.Write([]byte(`{"description":"Core border router","role":{"name":"Router"}}`))
+			return
+		}
+		_, _ = response.Write([]byte(`{"next":null,"results":[{"name":"sshd","protocol":"tcp","ports":[22],"ipaddresses":[{"address":"192.0.2.10/32"}],"device":{"name":"router-01","url":"/api/dcim/devices/1/"}}]}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "example", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	services, err := client.Services(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(services) != 1 {
+		t.Fatalf("service count = %d", len(services))
+	}
+	if got := services[0].Description; got != "Core border router" {
+		t.Fatalf("description = %q", got)
+	}
+}
+
 func TestValidateWrapsTransportError(t *testing.T) {
 	client, err := NewClient("https://netbox.example.test", "example", &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("network unavailable")

@@ -69,6 +69,26 @@ func TestModelFuzzySearchMatchesAbbreviatedServiceName(t *testing.T) {
 	}
 }
 
+func TestModelSearchMatchesDescriptionAndRole(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{
+		{Device: "edge-01", Name: "sshd", IPs: []string{"192.0.2.31"}, Ports: []int{22}, Role: "edge-router", Description: "primary transit gateway"},
+		{Device: "app-01", Name: "https", IPs: []string{"192.0.2.32"}, Ports: []int{443}, Role: "application", Description: "frontend"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	selector.filter.SetValue("transit")
+	if got := selector.visibleChoices(); len(got) != 1 || got[0].Service.TargetName() != "edge-01" {
+		t.Fatalf("description search visible choices = %#v", got)
+	}
+
+	selector.filter.SetValue("edge-router")
+	if got := selector.visibleChoices(); len(got) != 1 || got[0].Service.TargetName() != "edge-01" {
+		t.Fatalf("role search visible choices = %#v", got)
+	}
+}
+
 func TestModelNumberShortcutSelectsVisibleService(t *testing.T) {
 	selector, err := newModel(context.Background(), []netbox.Service{
 		{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}},
@@ -95,8 +115,8 @@ func TestModelNumberShortcutSelectsVisibleService(t *testing.T) {
 
 func TestModelViewShowsCompactAlignedColumnsAndSelectedDetails(t *testing.T) {
 	selector, err := newModel(context.Background(), []netbox.Service{
-		{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}, Role: "Router", Tenant: "Operations", Status: "active"},
-		{Device: "application-server-very-long", Name: "https", IPs: []string{"192.0.2.20"}, Ports: []int{443}, Role: "Application", Tenant: "Platform", Status: "planned"},
+		{Device: "router-01", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}, Role: "Router", Tenant: "Operations", Status: "active", Description: "Edge router"},
+		{Device: "application-server-very-long", Name: "https", IPs: []string{"192.0.2.20"}, Ports: []int{443}, Role: "Application", Tenant: "Platform", Status: "planned", Description: "Frontend service"},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -125,12 +145,12 @@ func TestModelViewShowsCompactAlignedColumnsAndSelectedDetails(t *testing.T) {
 			t.Fatalf("header unexpectedly contains %q: %q", unwanted, header)
 		}
 	}
-	if !strings.Contains(view, "Details: favorite: no | role: Router | tenant: Operations | status: active") {
+	if !strings.Contains(view, "Details: favorite: no | role: Router | tenant: Operations | status: active | description: Edge router") {
 		t.Fatalf("view does not show selected details: %q", view)
 	}
 	updated, _ := selector.Update(tea.KeyMsg{Type: tea.KeyDown})
 	selector = updated.(model)
-	if view = stripANSI(selector.View()); !strings.Contains(view, "Details: favorite: no | role: Application | tenant: Platform | status: planned") {
+	if view = stripANSI(selector.View()); !strings.Contains(view, "Details: favorite: no | role: Application | tenant: Platform | status: planned | description: Frontend service") {
 		t.Fatalf("view does not update selected details: %q", view)
 	}
 }

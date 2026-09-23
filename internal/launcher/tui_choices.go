@@ -26,7 +26,7 @@ func choiceSearchIndex(choices []Selection) []string {
 	for position, selection := range choices {
 		service := selection.Service
 		index[position] = strings.ToLower(strings.Join([]string{
-			service.Server, service.TargetName(), service.Name, selection.Endpoint, service.Role, service.Tenant, service.Status,
+			service.Server, service.TargetName(), service.Name, selection.Endpoint, service.Role, service.Tenant, service.Status, service.Description,
 		}, " "))
 	}
 	return index

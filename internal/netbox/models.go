@@ -18,6 +18,7 @@ type Service struct {
 	Tenant   string   `json:"tenant,omitempty"`
 	Platform string   `json:"platform,omitempty"`
 	Tags     []string `json:"tags,omitempty"`
+	Description string `json:"description,omitempty"`
 	Status   string   `json:"status,omitempty"`
 }
 

@@ -320,10 +320,10 @@ func (model model) writeSelectionDetails(output *strings.Builder, selection Sele
 		favorite = "yes"
 	}
 	if service.Server != "" {
-		fmt.Fprintf(output, "\nDetails: server: %s | favorite: %s | role: %s | tenant: %s | status: %s\n", service.Server, favorite, valueOrUnknown(service.Role), valueOrUnknown(service.Tenant), renderStyled(statusStyle(service.Status), valueOrUnknown(service.Status)))
+		fmt.Fprintf(output, "\nDetails: server: %s | favorite: %s | role: %s | tenant: %s | status: %s | description: %s\n", service.Server, favorite, valueOrUnknown(service.Role), valueOrUnknown(service.Tenant), renderStyled(statusStyle(service.Status), valueOrUnknown(service.Status)), valueOrUnknown(service.Description))
 		return
 	}
-	fmt.Fprintf(output, "\nDetails: favorite: %s | role: %s | tenant: %s | status: %s\n", favorite, valueOrUnknown(service.Role), valueOrUnknown(service.Tenant), renderStyled(statusStyle(service.Status), valueOrUnknown(service.Status)))
+	fmt.Fprintf(output, "\nDetails: favorite: %s | role: %s | tenant: %s | status: %s | description: %s\n", favorite, valueOrUnknown(service.Role), valueOrUnknown(service.Tenant), renderStyled(statusStyle(service.Status), valueOrUnknown(service.Status)), valueOrUnknown(service.Description))
 }
 
 func statusStyle(status string) string {

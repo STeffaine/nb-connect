@@ -105,6 +105,7 @@ func (client *Client) serviceFromRecord(ctx context.Context, record serviceRecor
 	}
 	service.Site = metadata.Site.text()
 	service.Role = metadata.Role.text()
+	service.Description = metadata.Description.text()
 	service.Tenant = metadata.Tenant.text()
 	service.Platform = metadata.Platform.text()
 	service.Status = metadata.Status.text()
@@ -227,6 +228,35 @@ func (object namedObject) text() string {
 	return ""
 }
 
+type textValue struct {
+	value string
+	object namedObject
+}
+
+func (text *textValue) UnmarshalJSON(data []byte) error {
+	var plain string
+	if err := json.Unmarshal(data, &plain); err == nil {
+		text.value = plain
+		text.object = namedObject{}
+		return nil
+	}
+
+	var object namedObject
+	if err := json.Unmarshal(data, &object); err != nil {
+		return fmt.Errorf("decode text value: %w", err)
+	}
+	text.object = object
+	text.value = ""
+	return nil
+}
+
+func (text textValue) text() string {
+	if text.value != "" {
+		return text.value
+	}
+	return text.object.text()
+}
+
 type parentObject struct {
 	Name       string `json:"name"`
 	Display    string `json:"display"`
@@ -235,11 +265,12 @@ type parentObject struct {
 }
 
 type targetMetadata struct {
-	Site     namedObject  `json:"site"`
-	Role     namedObject  `json:"role"`
-	Tenant   namedObject  `json:"tenant"`
-	Platform namedObject  `json:"platform"`
-	Status   statusChoice `json:"status"`
+	Site        namedObject  `json:"site"`
+	Role        namedObject  `json:"role"`
+	Tenant      namedObject  `json:"tenant"`
+	Platform    namedObject  `json:"platform"`
+	Status      statusChoice `json:"status"`
+	Description textValue    `json:"description"`
 }
 
 type statusChoice string
