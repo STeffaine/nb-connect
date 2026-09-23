@@ -17,6 +17,12 @@ type pingMessage struct {
 	done bool
 }
 
+type traceMessage struct {
+	line string
+	err  error
+	done bool
+}
+
 func startPing(ctx context.Context, endpoint string, count int, messages chan pingMessage) tea.Cmd {
 	return func() tea.Msg {
 		host, err := pingHost(endpoint)
@@ -29,6 +35,23 @@ func startPing(ctx context.Context, endpoint string, count int, messages chan pi
 }
 
 func waitForPingMessage(messages <-chan pingMessage) tea.Cmd {
+	return func() tea.Msg {
+		return <-messages
+	}
+}
+
+func startTraceroute(ctx context.Context, endpoint string, messages chan traceMessage) tea.Cmd {
+	return func() tea.Msg {
+		host, err := pingHost(endpoint)
+		if err != nil {
+			return traceMessage{err: err}
+		}
+		go streamTraceroute(ctx, host, messages)
+		return <-messages
+	}
+}
+
+func waitForTraceMessage(messages <-chan traceMessage) tea.Cmd {
 	return func() tea.Msg {
 		return <-messages
 	}
@@ -56,6 +79,30 @@ func streamPing(ctx context.Context, host string, count int, messages chan<- pin
 		return
 	}
 	messages <- pingMessage{err: command.Wait(), done: true}
+}
+
+func streamTraceroute(ctx context.Context, host string, messages chan<- traceMessage) {
+	defer close(messages)
+	command := exec.CommandContext(ctx, "traceroute", host)
+	output, err := command.StdoutPipe()
+	if err != nil {
+		messages <- traceMessage{err: err}
+		return
+	}
+	command.Stderr = command.Stdout
+	if err := command.Start(); err != nil {
+		messages <- traceMessage{err: err}
+		return
+	}
+	scanner := bufio.NewScanner(output)
+	for scanner.Scan() {
+		messages <- traceMessage{line: scanner.Text()}
+	}
+	if err := scanner.Err(); err != nil {
+		messages <- traceMessage{err: err}
+		return
+	}
+	messages <- traceMessage{err: command.Wait(), done: true}
 }
 
 func pingHost(endpoint string) (string, error) {

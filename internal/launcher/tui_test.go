@@ -402,7 +402,7 @@ func TestModelPingsSelectedEndpoint(t *testing.T) {
 	}
 	updated, command := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	selector = updated.(model)
-	if selector.selection != nil || !selector.pinging {
+	if selector.selection != nil || !selector.pinging || !selector.tracing || !selector.networkOverlay {
 		t.Fatalf("ping model = %#v", selector)
 	}
 	if command == nil {
@@ -415,19 +415,86 @@ func TestModelPingsSelectedEndpoint(t *testing.T) {
 	if !selector.pinging || !strings.Contains(viewWithPingOutput, "64 bytes from 192.0.2.10") {
 		t.Fatalf("live ping model = %#v", selector)
 	}
-	if !strings.Contains(viewWithPingOutput, "Ping in progress") {
+	if !strings.Contains(viewWithPingOutput, "Ping in progress") || !strings.Contains(viewWithPingOutput, "Traceroute") {
 		t.Fatalf("view does not show ping popup: %q", viewWithPingOutput)
 	}
-	if strings.Index(viewBeforePingOutput, "TARGET") != strings.Index(viewWithPingOutput, "TARGET") {
-		t.Fatalf("ping output moved the service list: before=%q after=%q", viewBeforePingOutput, viewWithPingOutput)
+	if strings.Contains(viewWithPingOutput, "TARGET") || strings.Contains(viewWithPingOutput, "Service information") {
+		t.Fatalf("network overlay should render over the list and info panel: %q", viewWithPingOutput)
+	}
+	if strings.Contains(viewBeforePingOutput, "TARGET") {
+		t.Fatalf("network overlay should hide list immediately: %q", viewBeforePingOutput)
 	}
 	updated, _ = selector.Update(pingMessage{done: true})
 	selector = updated.(model)
-	if selector.pinging {
+	updated, _ = selector.Update(traceMessage{done: true})
+	selector = updated.(model)
+	if selector.pinging || selector.tracing {
 		t.Fatalf("completed ping model = %#v", selector)
 	}
 	if view := stripANSI(selector.View()); !strings.Contains(view, "Ping results") {
 		t.Fatalf("view does not retain ping results popup: %q", view)
+	}
+	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	selector = updated.(model)
+	if selector.networkOverlay || selector.pinging || selector.tracing {
+		t.Fatalf("network overlay did not close on Esc: %#v", selector)
+	}
+}
+
+func TestModelShowsPingPopupOverSplitInfoPanel(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{
+		Server: "production",
+		Device: "router-01",
+		Name: "sshd",
+		IPs: []string{"192.0.2.10"},
+		Ports: []int{22},
+		Description: "Edge router",
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := selector.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
+	selector = updated.(model)
+	if !selector.infoOpen {
+		t.Fatalf("expected docked info panel to be open: %#v", selector)
+	}
+	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	selector = updated.(model)
+	if !selector.pinging {
+		t.Fatalf("expected pinging state: %#v", selector)
+	}
+	updated, _ = selector.Update(pingMessage{line: "64 bytes from 192.0.2.10"})
+	selector = updated.(model)
+	view := stripANSI(selector.View())
+	for _, want := range []string{"Ping in progress", "Traceroute", "┌", "┐", "│", "└", "┘"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view does not contain %q: %q", want, view)
+		}
+	}
+	if strings.Contains(view, "Service information") {
+		t.Fatalf("network overlay should hide info panel while active: %q", view)
+	}
+}
+
+func TestModelClosingNetworkOverlayStopsRunningCommands(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{{
+		Device: "router-01",
+		Name: "sshd",
+		IPs: []string{"192.0.2.10"},
+		Ports: []int{22},
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	selector = updated.(model)
+	if !selector.networkOverlay || !selector.pinging || !selector.tracing {
+		t.Fatalf("network overlay did not start: %#v", selector)
+	}
+	updated, _ = selector.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	selector = updated.(model)
+	if selector.networkOverlay || selector.pinging || selector.tracing {
+		t.Fatalf("network overlay did not stop active commands: %#v", selector)
 	}
 }
 

@@ -56,12 +56,17 @@ type model struct {
 	filterCursor         int
 	syncing              bool
 	pinging              bool
+	tracing              bool
+	networkOverlay       bool
 	syncError            string
 	syncNote             string
 	pingNote             string
+	traceNote            string
 	context              context.Context
+	networkCancel        context.CancelFunc
 	sync                 SyncServices
 	pingLines            chan pingMessage
+	traceLines           chan traceMessage
 	pingCount            int
 	width                int
 	height               int
@@ -138,6 +143,8 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return model, nil
 	case pingMessage:
 		return model.updatePing(message)
+	case traceMessage:
+		return model.updateTrace(message)
 	case syncResult:
 		return model.updateSync(message)
 	case tea.KeyMsg:
@@ -147,6 +154,9 @@ func (model model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (model model) updatePing(message pingMessage) (model, tea.Cmd) {
+	if !model.pinging {
+		return model, nil
+	}
 	if message.line != "" {
 		if model.pingNote != "" {
 			model.pingNote += "\n"
@@ -165,6 +175,30 @@ func (model model) updatePing(message pingMessage) (model, tea.Cmd) {
 		return model, nil
 	}
 	return model, waitForPingMessage(model.pingLines)
+}
+
+func (model model) updateTrace(message traceMessage) (model, tea.Cmd) {
+	if !model.tracing {
+		return model, nil
+	}
+	if message.line != "" {
+		if model.traceNote != "" {
+			model.traceNote += "\n"
+		}
+		model.traceNote += message.line
+	}
+	if message.err != nil {
+		model.tracing = false
+		if model.traceNote == "" {
+			model.traceNote = fmt.Sprintf("Traceroute failed: %v", message.err)
+		}
+		return model, nil
+	}
+	if message.done {
+		model.tracing = false
+		return model, nil
+	}
+	return model, waitForTraceMessage(model.traceLines)
 }
 
 func (model model) updateSync(message syncResult) (model, tea.Cmd) {
@@ -222,6 +256,18 @@ func (model model) updateSearchKey(message tea.KeyMsg) (model, tea.Cmd) {
 }
 
 func (model model) updateBrowseKey(message tea.KeyMsg) (model, tea.Cmd) {
+	if model.networkOverlay {
+		switch message.String() {
+		case "ctrl+c":
+			model = model.closeNetworkOverlay()
+			model.cancelled = true
+			return model, tea.Quit
+		case "esc", "q", "p":
+			model = model.closeNetworkOverlay()
+			return model, nil
+		}
+		return model, nil
+	}
 	if model.infoOverlay {
 		switch message.String() {
 		case "ctrl+c", "esc", "q", "i":
@@ -271,11 +317,20 @@ func (model model) updateBrowseKey(message tea.KeyMsg) (model, tea.Cmd) {
 			model = model.toggleFavorite(selection)
 		}
 	case "p":
-		if selection, ok := model.currentChoice(); ok && !model.pinging {
+		if selection, ok := model.currentChoice(); ok && !model.pinging && !model.tracing {
+			networkContext, cancel := context.WithCancel(model.context)
+			model.networkCancel = cancel
+			model.networkOverlay = true
 			model.pinging = true
+			model.tracing = true
 			model.pingNote = ""
+			model.traceNote = ""
 			model.pingLines = make(chan pingMessage, 16)
-			return model, startPing(model.context, selection.Endpoint, model.pingCount, model.pingLines)
+			model.traceLines = make(chan traceMessage, 16)
+			return model, tea.Batch(
+				startPing(networkContext, selection.Endpoint, model.pingCount, model.pingLines),
+				startTraceroute(networkContext, selection.Endpoint, model.traceLines),
+			)
 		}
 	case "l":
 		if len(model.recents) > 0 {
@@ -295,6 +350,17 @@ func (model model) updateBrowseKey(message tea.KeyMsg) (model, tea.Cmd) {
 		}
 	}
 	return model, nil
+}
+
+func (model model) closeNetworkOverlay() model {
+	if model.networkCancel != nil {
+		model.networkCancel()
+		model.networkCancel = nil
+	}
+	model.networkOverlay = false
+	model.pinging = false
+	model.tracing = false
+	return model
 }
 
 func (model model) currentChoice() (Selection, bool) {

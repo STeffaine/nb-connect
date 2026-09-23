@@ -38,17 +38,24 @@ const (
 )
 
 func (model model) View() string {
-	var output strings.Builder
+	if model.networkOverlay {
+		return model.renderNetworkOverlay()
+	}
 	if model.filtering {
+		var output strings.Builder
 		model.writeFilterMenu(&output)
 		return output.String()
-	}
-	if model.infoOverlay {
+	} else if model.infoOverlay {
 		return model.renderInfoOverlay()
-	}
-	if model.infoOpen && model.canDockInfoPanel() {
+	} else if model.infoOpen && model.canDockInfoPanel() {
 		return model.renderSplitView()
+	} else {
+		return model.renderListView()
 	}
+}
+
+func (model model) renderListView() string {
+	var output strings.Builder
 	if model.searching {
 		output.WriteString(model.filter.View())
 		output.WriteString("\n\n")
@@ -131,9 +138,6 @@ func (model model) View() string {
 		}
 		output.WriteString(footer)
 	}
-	if model.pinging || model.pingNote != "" {
-		model.writePingPopup(&output)
-	}
 	return output.String()
 }
 
@@ -181,36 +185,69 @@ func (model model) writeFilterMenu(output *strings.Builder) {
 	output.WriteString("\nTab options | j/k or arrows category | / search values | a all/any | Esc close\n")
 }
 
-func (model model) writePingPopup(output *strings.Builder) {
-	title := "Ping results"
+func (model model) renderNetworkOverlay() string {
+	pingTitle := "Ping results"
 	if model.pinging {
-		title = "Ping in progress"
+		pingTitle = "Ping in progress"
 	}
-	lines := []string{"Waiting for ping output..."}
+	traceTitle := "Traceroute results"
+	if model.tracing {
+		traceTitle = "Traceroute in progress"
+	}
+	pingLines := []string{"Waiting for ping output..."}
 	if model.pingNote != "" {
-		lines = strings.Split(model.pingNote, "\n")
+		pingLines = strings.Split(model.pingNote, "\n")
 	}
-	width := len(title)
-	for _, line := range lines {
-		width = max(width, len(line))
-	}
-	if model.width > 0 {
-		width = min(width, max(1, model.width-4))
+	traceLines := []string{"Waiting for traceroute output..."}
+	if model.traceNote != "" {
+		traceLines = strings.Split(model.traceNote, "\n")
 	}
 
-	output.WriteString("\n+")
-	output.WriteString(strings.Repeat("-", width+2))
-	output.WriteString("+\n")
-	fmt.Fprintf(output, "| %-*s |\n", width, truncate(title, width))
-	output.WriteString("+")
-	output.WriteString(strings.Repeat("-", width+2))
-	output.WriteString("+\n")
-	for _, line := range lines {
-		fmt.Fprintf(output, "| %-*s |\n", width, truncate(line, width))
+	totalWidth := model.width
+	if totalWidth <= 0 {
+		totalWidth = 80
 	}
-	output.WriteString("+")
-	output.WriteString(strings.Repeat("-", width+2))
-	output.WriteString("+\n")
+	const splitGap = 3
+	leftWidth := max(1, (totalWidth-splitGap)/2)
+	rightWidth := max(1, totalWidth-splitGap-leftWidth)
+	panelHeight := 16
+	if model.height > 0 {
+		panelHeight = max(6, model.height-4)
+	}
+
+	leftPanel := networkPanelBoxLines(pingTitle, pingLines, leftWidth, panelHeight)
+	rightPanel := networkPanelBoxLines(traceTitle, traceLines, rightWidth, panelHeight)
+	rows := combineColumns(leftPanel, rightPanel, leftWidth, splitGap)
+	rows = append(rows, "")
+	rows = append(rows, "p or Esc close | Ctrl+C cancel")
+	return strings.Join(rows, "\n")
+}
+
+func networkPanelBoxLines(title string, lines []string, outerWidth, outerHeight int) []string {
+	contentWidth := max(1, outerWidth-4)
+	contentHeight := max(1, outerHeight-4)
+	body := make([]string, 0, len(lines))
+	for _, line := range lines {
+		for _, wrapped := range wrapText(line, contentWidth) {
+			body = append(body, wrapped)
+		}
+	}
+	if len(body) > contentHeight {
+		body = body[:contentHeight]
+	}
+	for len(body) < contentHeight {
+		body = append(body, "")
+	}
+
+	box := make([]string, 0, outerHeight)
+	box = append(box, infoBoxTopLeft+strings.Repeat(infoBoxHorizontal, contentWidth+2)+infoBoxTopRight)
+	box = append(box, formatInfoBoxLine(renderStyled(headingStyle, title), contentWidth))
+	box = append(box, infoBoxDividerLeft+strings.Repeat(infoBoxHorizontal, contentWidth+2)+infoBoxDividerRight)
+	for _, line := range body {
+		box = append(box, formatInfoBoxLine(line, contentWidth))
+	}
+	box = append(box, infoBoxBottomLeft+strings.Repeat(infoBoxHorizontal, contentWidth+2)+infoBoxBottomRight)
+	return box
 }
 
 type searchInput struct {
@@ -402,16 +439,6 @@ func (model model) renderSplitView() string {
 	combined = append(combined, "")
 	combined = append(combined, strings.Split(strings.TrimSuffix(model.renderFooter(), "\n"), "\n")...)
 	return strings.Join(combined, "\n")
-}
-
-func (model model) renderListView() string {
-	var output strings.Builder
-	output.WriteString(model.renderListBody(model.width, true, false))
-	output.WriteString(model.renderFooter())
-	if model.pinging || model.pingNote != "" {
-		model.writePingPopup(&output)
-	}
-	return output.String()
 }
 
 func (model model) renderListBody(width int, includeDetails bool, fixedColumns bool) string {
