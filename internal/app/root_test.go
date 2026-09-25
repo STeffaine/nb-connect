@@ -319,6 +319,105 @@ func TestSelectionCancellationIsRecognized(t *testing.T) {
 	}
 }
 
+func TestSyncUsesEnvironmentPathOverrides(t *testing.T) {
+	t.Setenv("NBCON_CONFIG", "/tmp/from-env-config.yaml")
+	t.Setenv("NBCON_CREDENTIALS", "/tmp/from-env-credentials.yaml")
+
+	cachePath := filepath.Join(t.TempDir(), "services.json")
+	var gotConfigPath string
+	var gotCredentialsPath string
+	command := newRootCommand(dependencies{
+		loadConfig: func(path string) (config.Config, error) {
+			gotConfigPath = path
+			return config.Config{}, nil
+		},
+		loadCredentials: func(path string) (config.Credentials, error) {
+			gotCredentialsPath = path
+			return config.Credentials{}, nil
+		},
+		defaultConfig: func() (string, error) { return "/tmp/default-config.yaml", nil },
+		defaultCache:  func() (string, error) { return cachePath, nil },
+		newClient:     func(url, token string) (*netbox.Client, error) { return nil, nil },
+		now:           time.Now,
+	})
+
+	command.SetOut(&bytes.Buffer{})
+	command.SetArgs([]string{"sync"})
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if gotConfigPath != "/tmp/from-env-config.yaml" {
+		t.Fatalf("config path = %q, want %q", gotConfigPath, "/tmp/from-env-config.yaml")
+	}
+	if gotCredentialsPath != "/tmp/from-env-credentials.yaml" {
+		t.Fatalf("credentials path = %q, want %q", gotCredentialsPath, "/tmp/from-env-credentials.yaml")
+	}
+}
+
+func TestSyncDerivesCredentialsFromEnvironmentConfigPath(t *testing.T) {
+	t.Setenv("NBCON_CONFIG", "/tmp/custom/config.yaml")
+
+	cachePath := filepath.Join(t.TempDir(), "services.json")
+	var gotCredentialsPath string
+	command := newRootCommand(dependencies{
+		loadConfig: func(path string) (config.Config, error) {
+			return config.Config{}, nil
+		},
+		loadCredentials: func(path string) (config.Credentials, error) {
+			gotCredentialsPath = path
+			return config.Credentials{}, nil
+		},
+		defaultConfig: func() (string, error) { return "/tmp/default-config.yaml", nil },
+		defaultCache:  func() (string, error) { return cachePath, nil },
+		newClient:     func(url, token string) (*netbox.Client, error) { return nil, nil },
+		now:           time.Now,
+	})
+
+	command.SetOut(&bytes.Buffer{})
+	command.SetArgs([]string{"sync"})
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := gotCredentialsPath, "/tmp/custom/credentials.yaml"; got != want {
+		t.Fatalf("credentials path = %q, want %q", got, want)
+	}
+}
+
+func TestSyncFlagPathsOverrideEnvironment(t *testing.T) {
+	t.Setenv("NBCON_CONFIG", "/tmp/from-env-config.yaml")
+	t.Setenv("NBCON_CREDENTIALS", "/tmp/from-env-credentials.yaml")
+
+	cachePath := filepath.Join(t.TempDir(), "services.json")
+	var gotConfigPath string
+	var gotCredentialsPath string
+	command := newRootCommand(dependencies{
+		loadConfig: func(path string) (config.Config, error) {
+			gotConfigPath = path
+			return config.Config{}, nil
+		},
+		loadCredentials: func(path string) (config.Credentials, error) {
+			gotCredentialsPath = path
+			return config.Credentials{}, nil
+		},
+		defaultConfig: func() (string, error) { return "/tmp/default-config.yaml", nil },
+		defaultCache:  func() (string, error) { return cachePath, nil },
+		newClient:     func(url, token string) (*netbox.Client, error) { return nil, nil },
+		now:           time.Now,
+	})
+
+	command.SetOut(&bytes.Buffer{})
+	command.SetArgs([]string{"--config", "/tmp/from-flag-config.yaml", "--credentials", "/tmp/from-flag-credentials.yaml", "sync"})
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if gotConfigPath != "/tmp/from-flag-config.yaml" {
+		t.Fatalf("config path = %q, want %q", gotConfigPath, "/tmp/from-flag-config.yaml")
+	}
+	if gotCredentialsPath != "/tmp/from-flag-credentials.yaml" {
+		t.Fatalf("credentials path = %q, want %q", gotCredentialsPath, "/tmp/from-flag-credentials.yaml")
+	}
+}
+
 func writeTestFile(t *testing.T, directory, name, contents string) string {
 	t.Helper()
 	path := filepath.Join(directory, name)

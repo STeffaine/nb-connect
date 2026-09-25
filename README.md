@@ -45,15 +45,48 @@ Add to your system flake inputs:
 inputs.nbcon.url = "github:STeffaine/nb-connect";
 ```
 
-Add to your system flake outputs (with `nbcon` in specialArgs):
+Enable the module in your host definition:
 ```nix
-specialArgs = { inherit inputs; };
+nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
+	system = "x86_64-linux";
+	modules = [
+		inputs.nbcon.nixosModules.default
+		({ ... }: {
+			services.nbcon = {
+				enable = true;
+				settings = {
+					netbox.servers = [
+						{
+							name = "production";
+							url = "https://netbox.example.com";
+						}
+					];
+
+					services.enabled = [ "sshd" "telnet" ];
+
+					ssh = {
+						default_user = "ops";
+						keys.ops.identity_file = "/home/ops/.ssh/id_ops";
+					};
+				};
+
+				# Recommended: keep tokens in a secret file managed by sops-nix/agenix.
+				credentialsFile = "/run/secrets/nbcon-credentials.yaml";
+
+				# Alternative (less secure): inline credentials become part of the Nix store.
+				# credentials = {
+				#   netbox.servers.production.token = "replace-with-real-token";
+				# };
+
+				# Optional: set a shared cache path instead of per-user XDG cache.
+				# cachePath = "/var/cache/nbcon/services.json";
+			};
+		})
+	];
+};
 ```
 
-Import the module in your `configuration.nix`:
-```nix
-imports = [ "${inputs.nbcon}/nixos-module.nix" ];
-```
+When enabled, the module writes `/etc/nbcon/config.yaml` and exports `NBCON_CONFIG` and `NBCON_CREDENTIALS` so `nbcon` uses those files by default. If you use `credentialsFile`, that path is exported directly and no credentials file is written to `/etc`.
 
 Then rebuild your system:
 ```sh
@@ -92,6 +125,81 @@ netbox:
 ```
 
 The `netbox.servers` mappings are required, including when connecting to only one NetBox instance.
+
+## Configuration Reference
+
+This section documents every supported configuration option and how `nbcon` resolves file paths.
+
+### Path resolution and precedence
+
+`nbcon` resolves file paths in this order:
+
+1. Explicit CLI flags: `--config`, `--credentials`, `--cache`
+2. Environment variables: `NBCON_CONFIG`, `NBCON_CREDENTIALS`, `NBCON_CACHE`
+3. Built-in defaults:
+	- Config: `${XDG_CONFIG_HOME:-~/.config}/nb-connect/config.yaml`
+	- Credentials: `<directory of config path>/credentials.yaml`
+	- Cache: `${XDG_CACHE_HOME:-~/.cache}/nb-connect/services.json`
+
+### `config.yaml` options
+
+| Key | Type | Required | Default | Details |
+| --- | --- | --- | --- | --- |
+| `netbox.servers` | list of objects | Yes | none | Must contain at least one NetBox server definition. |
+| `netbox.servers[].name` | string | Yes | none | Server name used for filtering and credential lookup. Case-insensitive match at runtime. Leading/trailing whitespace is trimmed. Must be unique (case-insensitive). |
+| `netbox.servers[].url` | string | Yes | none | NetBox base URL. Must start with `http://` or `https://`. Leading/trailing whitespace is trimmed and trailing `/` is removed. Do not include `/api/`. |
+| `netbox.servers[].ssh` | object | No | unset | Per-server SSH configuration. When set, it fully replaces global `ssh` for that server (it does not merge with global `ssh`). |
+| `services.enabled` | list of strings | No | empty list | NetBox service names to keep in cache and show in selector. Match is case-insensitive and trims surrounding whitespace. Empty list means no services are selected. |
+| `ssh.default_user` | string | No | empty string | Default SSH username used for SSH-based services when no per-server `ssh` override applies. Practically required for SSH/SSHD connections. |
+| `ssh.keys` | map | No | empty map | Keyed by username. Lets you define a private key per SSH user. |
+| `ssh.keys.<user>.identity_file` | string | No | empty string | Path passed to `ssh -i` for that user. Supports `~` and `~/...` expansion to home directory. |
+| `cache.ttl` | duration string | No | `15m` | Parsed using Go duration syntax (for example `30s`, `15m`, `1h`). Currently parsed and validated, but not used to auto-expire cached data. |
+| `ping.count` | integer | No | `4` | Number of ICMP echo requests used by the launcher ping action. Must be greater than `0`. |
+| `launcher.info_panel_open_by_default` | boolean | No | `true` | Whether launcher info panel starts open when layout has room. |
+
+Per-server SSH block uses the same schema as global `ssh`:
+
+| Key | Type | Required | Default | Details |
+| --- | --- | --- | --- | --- |
+| `netbox.servers[].ssh.default_user` | string | No | empty string | Default SSH user for that server only. |
+| `netbox.servers[].ssh.keys` | map | No | empty map | Per-user SSH key map for that server only. |
+| `netbox.servers[].ssh.keys.<user>.identity_file` | string | No | empty string | Identity file for that server/user pair. Supports `~` expansion. |
+
+### `credentials.yaml` options
+
+| Key | Type | Required | Default | Details |
+| --- | --- | --- | --- | --- |
+| `netbox.servers` | map | Yes | none | Must exist and include entries for each NetBox server you want to sync. |
+| `netbox.servers.<name>.token` | string | Yes (per used server) | none | NetBox API token for that server. Server name matching is case-insensitive. Empty token is treated as missing. |
+
+Notes:
+
+1. For each configured NetBox server in `config.yaml`, `nbcon sync` requires a matching credentials entry.
+2. Names are matched case-insensitively, so `Production` and `production` refer to the same server key.
+
+### NixOS module options (`services.nbcon`)
+
+When using `inputs.nbcon.nixosModules.default`, these options are available:
+
+| Option | Type | Required | Default | Details |
+| --- | --- | --- | --- | --- |
+| `services.nbcon.enable` | bool | No | `false` | Enables module behavior and installs package. |
+| `services.nbcon.package` | package | No | flake package `nbcon` | Package added to `environment.systemPackages`. |
+| `services.nbcon.settings` | attrset (YAML) | No | `{}` | Rendered to `/etc/nbcon/config.yaml`. Should contain the same schema as `config.yaml`. |
+| `services.nbcon.credentials` | attrset or `null` | Conditionally | `null` | Inline credentials rendered to `/etc/nbcon/credentials.yaml`. Not recommended for secrets because it is stored in the Nix store. |
+| `services.nbcon.credentialsFile` | string or `null` | Conditionally | `null` | Path to external credentials file (recommended for secrets managers like sops-nix/agenix). |
+| `services.nbcon.cachePath` | string or `null` | No | `null` | When set, exported as `NBCON_CACHE` for default cache location. |
+
+Module assertions:
+
+1. Set exactly one of `services.nbcon.credentials` or `services.nbcon.credentialsFile`.
+2. If both are unset, evaluation fails.
+
+Module exports:
+
+1. `NBCON_CONFIG=/etc/nbcon/config.yaml`
+2. `NBCON_CREDENTIALS=<credentialsFile or /etc/nbcon/credentials.yaml>`
+3. `NBCON_CACHE=<cachePath>` only when `cachePath` is set
 
 ## User Guide
 
@@ -164,7 +272,7 @@ Use `--refresh` to synchronize with NetBox before reading the cache:
 nbcon connect --refresh
 ```
 
-Use `--config`, `--credentials`, and `--cache` to override the default paths, which makes automation and testing straightforward.
+Use `--config`, `--credentials`, and `--cache` to override the default paths. You can also set `NBCON_CONFIG`, `NBCON_CREDENTIALS`, and `NBCON_CACHE` to provide defaults from your shell or system profile. Explicit flags always take precedence over environment variables.
 
 ### Ping checks
 

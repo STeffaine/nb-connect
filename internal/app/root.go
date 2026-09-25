@@ -58,21 +58,33 @@ func newRootCommand(deps dependencies) *cobra.Command {
 
 	resolvePaths := func() (string, string, string, error) {
 		if configPath == "" {
-			path, err := deps.defaultConfig()
-			if err != nil {
-				return "", "", "", err
+			if path := strings.TrimSpace(os.Getenv("NBCON_CONFIG")); path != "" {
+				configPath = path
+			} else {
+				path, err := deps.defaultConfig()
+				if err != nil {
+					return "", "", "", err
+				}
+				configPath = path
 			}
-			configPath = path
 		}
 		if credentialsPath == "" {
-			credentialsPath = config.DefaultCredentialsPath(configPath)
+			if path := strings.TrimSpace(os.Getenv("NBCON_CREDENTIALS")); path != "" {
+				credentialsPath = path
+			} else {
+				credentialsPath = config.DefaultCredentialsPath(configPath)
+			}
 		}
 		if cachePath == "" {
-			path, err := deps.defaultCache()
-			if err != nil {
-				return "", "", "", err
+			if path := strings.TrimSpace(os.Getenv("NBCON_CACHE")); path != "" {
+				cachePath = path
+			} else {
+				path, err := deps.defaultCache()
+				if err != nil {
+					return "", "", "", err
+				}
+				cachePath = path
 			}
-			cachePath = path
 		}
 		return configPath, credentialsPath, cachePath, nil
 	}
