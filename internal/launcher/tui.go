@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/steffaine/nb-connect/internal/config"
 	"github.com/steffaine/nb-connect/internal/netbox"
 )
 
@@ -22,7 +23,36 @@ var ErrSelectionCancelled = errors.New("service selection cancelled")
 type SyncServices func(context.Context) ([]netbox.Service, error)
 
 func Select(ctx context.Context, services []netbox.Service, serverFilter string, pingCount int, infoPanelOpenByDefault bool, syncServices SyncServices) (Selection, error) {
-	selector, err := newModelWithPingCountAndSettings(ctx, services, pingCount, infoPanelOpenByDefault, syncServices, serverFilter)
+	return SelectWithOptions(ctx, SelectOptions{Services: services, ServerFilter: serverFilter, PingCount: pingCount, InfoPanelOpenByDefault: infoPanelOpenByDefault, Sync: syncServices})
+}
+
+// SelectOptions configures the interactive selector, including filter presets.
+type SelectOptions struct {
+	Services               []netbox.Service
+	ServerFilter           string
+	PresetName             string
+	Presets                []config.FilterPreset
+	SavePreset             PresetSaver
+	DeletePreset           PresetDeleter
+	PingCount              int
+	InfoPanelOpenByDefault bool
+	Sync                   SyncServices
+}
+
+// SelectWithOptions opens the selector with filter presets available in the
+// filter menu. PresetName pre-applies that preset; ServerFilter overrides any
+// preset server selection.
+func SelectWithOptions(ctx context.Context, options SelectOptions) (Selection, error) {
+	selector, err := newModelWithOptions(ctx, options.Services, modelOptions{
+		PingCount:            options.PingCount,
+		InfoPanelOpenByDefault: options.InfoPanelOpenByDefault,
+		Sync:                 options.Sync,
+		ServerFilter:         options.ServerFilter,
+		PresetName:           options.PresetName,
+		Presets:              options.Presets,
+		SavePreset:           options.SavePreset,
+		DeletePreset:         options.DeletePreset,
+	})
 	if err != nil {
 		return Selection{}, err
 	}
@@ -79,6 +109,18 @@ type model struct {
 	favorites            map[string]bool
 	recents              []string
 	statePath            string
+	presets              []config.FilterPreset
+	savePreset           PresetSaver
+	deletePreset         PresetDeleter
+	deletingPreset       bool
+	deletePresetName     string
+	savingPreset         bool
+	presetPicker         bool
+	presetCursor         int
+	presetNameInput      searchInput
+	presetNote           string
+	presetError          string
+	activePreset         string
 }
 
 type syncResult struct {
@@ -99,6 +141,21 @@ func newModelWithPingCount(ctx context.Context, services []netbox.Service, pingC
 }
 
 func newModelWithPingCountAndSettings(ctx context.Context, services []netbox.Service, pingCount int, infoPanelOpenByDefault bool, syncServices SyncServices, serverFilter string) (model, error) {
+	return newModelWithOptions(ctx, services, modelOptions{PingCount: pingCount, InfoPanelOpenByDefault: infoPanelOpenByDefault, Sync: syncServices, ServerFilter: serverFilter})
+}
+
+type modelOptions struct {
+	PingCount            int
+	InfoPanelOpenByDefault bool
+	Sync                 SyncServices
+	ServerFilter         string
+	PresetName           string
+	Presets              []config.FilterPreset
+	SavePreset           PresetSaver
+	DeletePreset         PresetDeleter
+}
+
+func newModelWithOptions(ctx context.Context, services []netbox.Service, options modelOptions) (model, error) {
 	choices, err := choicesForServices(services)
 	if err != nil {
 		return model{}, err
@@ -111,7 +168,14 @@ func newModelWithPingCountAndSettings(ctx context.Context, services []netbox.Ser
 		recents = nil
 	}
 	filters := newServiceFilters()
-	if trimmed := strings.TrimSpace(serverFilter); trimmed != "" {
+	activePreset := ""
+	if trimmed := strings.TrimSpace(options.PresetName); trimmed != "" {
+		if preset, ok := config.PresetByName(options.Presets, trimmed); ok {
+			filters = filtersFromPreset(preset, choices)
+			activePreset = strings.TrimSpace(preset.Name)
+		}
+	}
+	if trimmed := strings.TrimSpace(options.ServerFilter); trimmed != "" {
 		canonicalServer := trimmed
 		for _, service := range services {
 			if strings.EqualFold(service.Server, trimmed) {
@@ -119,9 +183,12 @@ func newModelWithPingCountAndSettings(ctx context.Context, services []netbox.Ser
 				break
 			}
 		}
+		if activePreset != "" {
+			delete(filters.values, filterServer)
+		}
 		filters.toggle(filterServer, canonicalServer)
 	}
-	return model{choices: choices, choiceSearch: choiceSearchIndex(choices), context: ctx, filter: filter, filters: filters, sync: syncServices, pingCount: pingCount, favorites: favorites, recents: recents, statePath: statePath, infoPanelOpenByDefault: infoPanelOpenByDefault}, nil
+	return model{choices: choices, choiceSearch: choiceSearchIndex(choices), context: ctx, filter: filter, filters: filters, sync: options.Sync, pingCount: options.PingCount, favorites: favorites, recents: recents, statePath: statePath, infoPanelOpenByDefault: options.InfoPanelOpenByDefault, presets: options.Presets, savePreset: options.SavePreset, deletePreset: options.DeletePreset, activePreset: activePreset}, nil
 }
 
 func (model model) Init() tea.Cmd {
@@ -361,6 +428,13 @@ func (model model) returnHome() model {
 	model.filterMenuSearch.Blur()
 	model.filterOptionsFocused = false
 	model.filterCursor = 0
+	model.savingPreset = false
+	model.presetPicker = false
+	model.presetCursor = 0
+	model.deletingPreset = false
+	model.deletePresetName = ""
+	model.presetNameInput.SetValue("")
+	model.presetNameInput.Blur()
 	model.infoOverlay = false
 	model.cursor = 0
 	return model

@@ -142,11 +142,33 @@ func (model model) renderListView() string {
 }
 
 func (model model) writeFilterMenu(output *strings.Builder) {
+	if model.presetPicker {
+		model.writePresetPicker(output)
+		return
+	}
 	mode := "all conditions"
 	if !model.filters.matchAll {
 		mode = "any condition"
 	}
 	fmt.Fprintf(output, "Filters: %s\n", mode)
+	if model.activePreset != "" {
+		fmt.Fprintf(output, "Active preset: %s\n", model.activePreset)
+	} else if len(model.presets) > 0 {
+		names := make([]string, 0, len(model.presets))
+		for _, preset := range model.presets {
+			names = append(names, strings.TrimSpace(preset.Name))
+		}
+		fmt.Fprintf(output, "Presets: %s\n", strings.Join(names, ", "))
+	}
+	if model.presetNote != "" {
+		fmt.Fprintf(output, "%s\n", model.presetNote)
+	}
+	if model.presetError != "" {
+		fmt.Fprintf(output, "Preset error: %s\n", model.presetError)
+	}
+	if model.savingPreset {
+		fmt.Fprintf(output, "\nSave preset as: %s\n", model.presetNameInput.Value())
+	}
 	for index, category := range filterCategories {
 		prefix := "  "
 		if !model.filterOptionsFocused && index == model.filterCategory {
@@ -174,15 +196,70 @@ func (model model) writeFilterMenu(output *strings.Builder) {
 		}
 		fmt.Fprintf(output, "%s[%s] %s\n", prefix, marker, option)
 	}
+	if model.savingPreset {
+		output.WriteString("\nType preset name | Enter save | q home | Esc quit\n")
+		return
+	}
 	if model.filterSearching {
 		output.WriteString("\nType to search | arrows move | Space select more | Enter select | q home | Esc quit\n")
 		return
 	}
 	if model.filterOptionsFocused {
-		output.WriteString("\nTab filters | / search values | j/k or arrows move | Space/Enter select | a all/any | q home | Esc quit\n")
+		output.WriteString("\nTab filters | / search values | j/k or arrows move | Space/Enter select | a all/any | d clear | s save preset | p browse presets | q home | Esc quit\n")
 		return
 	}
-	output.WriteString("\nTab options | j/k or arrows category | / search values | a all/any | q home | Esc quit\n")
+	output.WriteString("\nTab options | j/k or arrows category | / search values | a all/any | d clear | s save preset | p browse presets | q home | Esc quit\n")
+}
+
+func (model model) writePresetPicker(output *strings.Builder) {
+	fmt.Fprintf(output, "Presets (%d)\n", len(model.presets))
+	if model.presetNote != "" {
+		fmt.Fprintf(output, "%s\n", model.presetNote)
+	}
+	if model.presetError != "" {
+		fmt.Fprintf(output, "Preset error: %s\n", model.presetError)
+	}
+	output.WriteString("\n")
+	start, end := model.presetRange()
+	for index := start; index < end; index++ {
+		preset := model.presets[index]
+		prefix := "  "
+		if index == model.presetCursor {
+			prefix = "> "
+		}
+		shortcut := "  "
+		if index < 9 {
+			shortcut = fmt.Sprintf("%d ", index+1)
+		}
+		marker := " "
+		if strings.EqualFold(strings.TrimSpace(preset.Name), model.activePreset) {
+			marker = "*"
+		}
+		fmt.Fprintf(output, "%s%s%s %s\n", prefix, shortcut, marker, strings.TrimSpace(preset.Name))
+	}
+	if model.deletingPreset {
+		output.WriteString("\ny delete | n keep | q home | Esc quit\n")
+		return
+	}
+	output.WriteString("\nj/k or arrows move | 1-9 apply | Enter apply | r delete | p back | q home | Esc quit\n")
+}
+
+func (model model) presetRange() (int, int) {
+	choiceCount := len(model.presets)
+	if model.height <= 0 || choiceCount == 0 {
+		return 0, choiceCount
+	}
+	rowCount := max(1, model.height-10)
+	if choiceCount <= rowCount {
+		return 0, choiceCount
+	}
+	start := max(0, model.presetCursor-rowCount/2)
+	end := start + rowCount
+	if end > choiceCount {
+		end = choiceCount
+		start = end - rowCount
+	}
+	return start, end
 }
 
 func (model model) renderNetworkOverlay() string {

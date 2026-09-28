@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -89,6 +90,49 @@ func TestFilterMenuSearchesSelectsAndMatchesAllOrAny(t *testing.T) {
 	selector = updated.(model)
 	if got := selector.visibleChoices(); len(got) != 3 {
 		t.Fatalf("any-condition matches = %#v", got)
+	}
+}
+
+func TestFilterMenuDClearsAllFilters(t *testing.T) {
+	selector, err := newModel(context.Background(), []netbox.Service{
+		{Server: "production", Device: "vpn-a", Name: "sshd", IPs: []string{"192.0.2.10"}, Ports: []int{22}, Site: "site-a", Tenant: "tenant-1", Role: "vpn-server"},
+		{Server: "lab", Device: "vpn-b", Name: "sshd", IPs: []string{"192.0.2.11"}, Ports: []int{22}, Site: "site-b", Tenant: "tenant-2", Role: "vpn-server"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	press := func(key string) {
+		t.Helper()
+		updated, _ := selector.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		selector = updated.(model)
+	}
+
+	press("f")
+	press("tab")
+	press(" ")
+	press("tab")
+	press("j")
+	press("tab")
+	press(" ")
+	if got := len(selector.filters.values); got != 2 {
+		t.Fatalf("selected filter categories = %d, want 2", got)
+	}
+	if got := selector.visibleChoices(); len(got) != 0 {
+		t.Fatalf("filtered choices = %d, want 0", len(got))
+	}
+	selector.activePreset = "stale preset"
+	press("d")
+	if len(selector.filters.values) != 0 {
+		t.Fatalf("filters after d = %#v, want empty", selector.filters.values)
+	}
+	if selector.activePreset != "" {
+		t.Fatalf("active preset after d = %q, want empty", selector.activePreset)
+	}
+	if got := selector.visibleChoices(); len(got) != 2 {
+		t.Fatalf("visible choices after d = %d, want 2", len(got))
+	}
+	if view := selector.View(); !strings.Contains(view, "d clear") {
+		t.Fatalf("filter menu footer = %q, want d clear hint", view)
 	}
 }
 

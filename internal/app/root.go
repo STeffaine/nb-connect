@@ -48,6 +48,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 	var target string
 	var serviceName string
 	var endpoint string
+	var presetName string
 	var refresh bool
 	var dryRun bool
 
@@ -248,7 +249,13 @@ func newRootCommand(deps dependencies) *cobra.Command {
 				return err
 			}
 
-			selection, err := selectService(command.Context(), snapshot.Services, serverFilter, target, serviceName, endpoint, configuration.Ping.Count, configuration.Launcher.InfoPanelOpenByDefault, func(ctx context.Context) ([]netbox.Service, error) {
+			savePreset := func(preset config.FilterPreset) error {
+				return config.SaveFilterPreset(configurationPath, preset)
+			}
+			deletePreset := func(name string) error {
+				return config.DeleteFilterPreset(configurationPath, name)
+			}
+			selection, err := selectServiceWithPreset(command.Context(), snapshot.Services, serverFilter, presetName, target, serviceName, endpoint, configuration.Ping.Count, configuration.Launcher.InfoPanelOpenByDefault, configuration.Filters, savePreset, deletePreset, func(ctx context.Context) ([]netbox.Service, error) {
 				return refreshServices(ctx, nil, "")
 			})
 			if err != nil {
@@ -271,6 +278,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 		},
 	}
 	connectCommand.Flags().StringVar(&serverName, "server", "", "NetBox server name")
+	connectCommand.Flags().StringVar(&presetName, "preset", "", "filter preset name from config.yaml")
 	connectCommand.Flags().StringVar(&target, "target", "", "target device or virtual machine name")
 	connectCommand.Flags().StringVar(&serviceName, "service", "", "NetBox service name")
 	connectCommand.Flags().StringVar(&endpoint, "endpoint", "", "endpoint in host:port form")
@@ -318,11 +326,38 @@ func connectionCommandFor(selection launcher.Selection, configuration config.Con
 }
 
 func selectService(ctx context.Context, services []netbox.Service, serverFilter, target, serviceName, endpoint string, pingCount int, infoPanelOpenByDefault bool, syncServices launcher.SyncServices) (launcher.Selection, error) {
+	return selectServiceWithPreset(ctx, services, serverFilter, "", target, serviceName, endpoint, pingCount, infoPanelOpenByDefault, nil, nil, nil, syncServices)
+}
+
+func selectServiceWithPreset(ctx context.Context, services []netbox.Service, serverFilter, presetName, target, serviceName, endpoint string, pingCount int, infoPanelOpenByDefault bool, presets []config.FilterPreset, savePreset launcher.PresetSaver, deletePreset launcher.PresetDeleter, syncServices launcher.SyncServices) (launcher.Selection, error) {
+	var preset config.FilterPreset
+	if trimmed := strings.TrimSpace(presetName); trimmed != "" {
+		found, ok := config.PresetByName(presets, trimmed)
+		if !ok {
+			return launcher.Selection{}, fmt.Errorf("no filter preset named %q", trimmed)
+		}
+		preset = found
+	}
 	if target == "" && serviceName == "" && endpoint == "" {
-		return launcher.Select(ctx, services, serverFilter, pingCount, infoPanelOpenByDefault, syncServices)
+		return launcher.SelectWithOptions(ctx, launcher.SelectOptions{
+			Services:               services,
+			ServerFilter:           serverFilter,
+			PresetName:             strings.TrimSpace(presetName),
+			Presets:                presets,
+			SavePreset:             savePreset,
+			DeletePreset:           deletePreset,
+			PingCount:              pingCount,
+			InfoPanelOpenByDefault: infoPanelOpenByDefault,
+			Sync:                   syncServices,
+		})
 	}
 	if target == "" || serviceName == "" {
 		return launcher.Selection{}, fmt.Errorf("--target and --service must be used together")
+	}
+	if serverFilter == "" && strings.TrimSpace(presetName) != "" {
+		if servers := preset.EffectiveServers(); len(servers) == 1 {
+			serverFilter = servers[0]
+		}
 	}
 	if serverFilter != "" {
 		services = filterServicesByServer(services, serverFilter)

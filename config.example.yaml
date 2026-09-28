@@ -62,3 +62,26 @@ launcher:
   # Open the info panel by default when the screen is wide enough.
   # Default: true. Press i in the selector to toggle it.
   info_panel_open_by_default: true
+
+# Optional saved filter presets for the selector. Each preset needs a unique
+# name; server/servers, match, and the tenant/site/role lists are optional.
+# Use `server` for one NetBox server or `servers` for several. `match` is
+# "all" (default) or "any". Saving from the selector (S key in the filter
+# menu) creates this section when it is missing.
+#filters:
+#  - name: prod vpn
+#    server: production
+#    match: all
+#    tenants:
+#      - team-a
+#    sites:
+#      - site-a
+#    roles:
+#      - vpn-server
+#  - name: all vpn
+#    servers:
+#      - production
+#      - lab
+#    match: any
+#    roles:
+#      - vpn-server

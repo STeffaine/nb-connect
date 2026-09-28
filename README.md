@@ -156,6 +156,7 @@ This section documents every supported configuration option and how `nbcon` reso
 | `cache.ttl` | duration string | No | `15m` | Parsed using Go duration syntax (for example `30s`, `15m`, `1h`). Currently parsed and validated, but not used to auto-expire cached data. |
 | `ping.count` | integer | No | `4` | Number of ICMP echo requests for `ping -c` in the launcher network overlay. Unset or `0` selects `4`; negative values are rejected. |
 | `launcher.info_panel_open_by_default` | boolean | No | `true` | Whether launcher info panel starts open when layout has room. |
+| `filters` | list of objects | No | empty list | Saved filter presets for the selector. Created automatically when you save a preset with `s` in the filter menu. |
 
 Per-server SSH block uses the same schema as global `ssh`. Because replacement is whole-block, a server with an `ssh` block that omits `default_user` has no SSH user even when the global block sets one.
 
@@ -164,6 +165,30 @@ Per-server SSH block uses the same schema as global `ssh`. Because replacement i
 | `netbox.servers[].ssh.default_user` | string | No | empty string | Default SSH user for that server only. Used verbatim as the SSH login name. |
 | `netbox.servers[].ssh.keys` | map | No | empty map | Per-user SSH key map for that server only. Lookup is an exact, case-sensitive match on the effective user. |
 | `netbox.servers[].ssh.keys.<user>.identity_file` | string | No | empty string | Identity file for that server/user pair. Only `~` and `~/...` are expanded; other forms are used as-is. |
+
+Each `filters[]` entry is a named preset:
+
+| Key | Type | Required | Default | Details |
+| --- | --- | --- | --- | --- |
+| `filters[].name` | string | Yes | none | Preset name. Trimmed, must be unique (case-insensitive). Saving a preset with an existing name replaces it. |
+| `filters[].server` | string | No | empty | Single NetBox server for the preset. Shorthand for `servers` with one entry; merged with `servers` on load. |
+| `filters[].servers` | string or list | No | empty | One or more NetBox server names. Accepts a single string or a list. |
+| `filters[].match` | string | No | `all` | `all` requires every selected category to match; `any` requires at least one. Case-insensitive. |
+| `filters[].tenants` | string or list | No | empty | Tenant values to select. Accepts a single string or a list. |
+| `filters[].sites` | string or list | No | empty | Site values to select. |
+| `filters[].roles` | string or list | No | empty | Role values to select. |
+
+Filter values are trimmed and matched exactly (case-sensitive) in the selector, except server names which are matched case-insensitively against the cache when a preset is applied. Empty strings are dropped.
+
+```yaml
+filters:
+  - name: prod vpn
+    server: production
+    match: all
+    tenants: [team-a]
+    sites: [site-a]
+    roles: [vpn-server]
+```
 
 ### `credentials.yaml` options
 
@@ -206,14 +231,14 @@ Module exports:
 
 1. Copy the example configuration files as shown above. Set each NetBox server URL, add its matching API token, and choose the service names that `nbcon` should expose in `services.enabled`.
 2. Run `nbcon sync` to validate the configured servers and save their enabled services locally. Repeat this whenever NetBox service data changes.
-3. Run `nbcon` to open the cached service selector, or `nbcon <server>` (e.g., `nbcon server-a`) to open the selector pre-filtered to entries from that NetBox instance. Press `/` to search services, or `f` to filter by NetBox server, tenant, site, and role. In the filter menu, use `j`/`k` or arrow keys to choose a filter category, press Tab to move to its values, then use `j`/`k` or arrow keys to navigate and Space or Enter to select values. Press Tab again to return to filter categories. Press `/` to search values; while searching, use arrow keys to navigate results, Space to select more values, and Enter to select and return to the options. Press `a` to switch between matching all selected filter categories and any selected category. Press `q` to return to the list with your filter selections kept. Select with Enter (or `1`–`9`), press `m` to star a favorite, `p` to ping and traceroute the selected endpoint, `i` for details, and Esc to exit without connecting. `q` never quits; Esc quits from anywhere. See Selector keys below for the full list.
+3. Run `nbcon` to open the cached service selector, or `nbcon <server>` (e.g., `nbcon server-a`) to open the selector pre-filtered to entries from that NetBox instance. Press `/` to search services, or `f` to filter by NetBox server, tenant, site, and role. In the filter menu, use `j`/`k` or arrow keys to choose a filter category, press Tab to move to its values, then use `j`/`k` or arrow keys to navigate and Space or Enter to select values. Press Tab again to return to filter categories. Press `/` to search values; while searching, use arrow keys to navigate results, Space to select more values, and Enter to select and return to the options. Press `a` to switch between matching all selected filter categories and any selected category. Press `d` to remove all filters. Press `s` to save the current filters as a named preset in `config.yaml`, or `p` to browse saved presets in a picker (`1`–`9` or `Enter` applies the preset and returns to the list; `r` deletes the highlighted preset after a `y`/`n` confirmation). Press `q` to return to the list with your filter selections kept. Select with Enter (or `1`–`9`), press `m` to star a favorite, `p` to ping and traceroute the selected endpoint, `i` for details, and Esc to exit without connecting. `q` never quits; Esc quits from anywhere. See Selector keys below for the full list.
 4. For automation, use `nbcon connect --target <target> --service <service>` (the `connect` word may be omitted). Add `--server <name>` or pass the server positional argument when targets are duplicated across NetBox instances, and use `--dry-run` to inspect the local connection command first.
 
 The selector and `list` command work from the local cache, so they remain usable without NetBox access after a successful sync. Only synchronization reads the credentials file. Use `nbcon connect --refresh` when a connection should synchronize before selecting a service.
 
 ## Connecting
 
-The plain `nbcon` command is shorthand for `nbcon connect`: it accepts every `connect` flag, so `nbcon --target router-01 --service sshd --dry-run` works without the `connect` word. With none of `--target`, `--service`, or `--endpoint` given, it opens a built-in terminal selector over cached services. Running `nbcon <server>` (such as `nbcon production`) opens the same selector with that NetBox server pre-selected in the filters. No additional host package is required.
+The plain `nbcon` command is shorthand for `nbcon connect`: it accepts every `connect` flag, so `nbcon --target router-01 --service sshd --dry-run` works without the `connect` word. With none of `--target`, `--service`, or `--endpoint` given, it opens a built-in terminal selector over cached services. Running `nbcon <server>` (such as `nbcon production`) opens the same selector with that NetBox server pre-selected in the filters. Use `--preset <name>` (for example, `nbcon --preset "prod vpn"`) to open the selector with that saved `filters` preset applied; `--server` (or the positional argument) overrides the preset's server selection. No additional host package is required.
 
 ### Selector keys
 
@@ -232,11 +257,13 @@ The plain `nbcon` command is shorthand for `nbcon connect`: it accepts every `co
 | `q` | Home: close menus and overlays, clear search text, reset cursor (keeps chosen filter values; never quits) |
 | `Esc` or `Ctrl+C` | Quit without connecting (exit status 0), from anywhere including menus and overlays |
 
-Search matches case-insensitively against server, target, service name, endpoint, role, tenant, status, and description. A row matches when the query is a substring or a fuzzy in-order abbreviation of that combined text, and the list filters live as you type. (`q` returns home instead of typing the letter, even while searching.)
+Search matches case-insensitively against server, target, service name, endpoint, role, tenant, status, and description. A row matches when the query is a substring or a fuzzy in-order abbreviation of that combined text, and the list filters live as you type. (`q` returns home instead of typing the letter, even while searching or naming a preset; edit `config.yaml` directly for preset names containing lowercase `q`.)
 
-In the filter menu, categories are focused first: use `j`/`k` or arrow keys to move within the focused pane and `Tab` to switch between categories and values (`left`/`right` also switch categories). Press `Space` or `Enter` to toggle a value, `/` to search values (arrows move, `Space` toggles more, `Enter` toggles and returns to the values), and `a` to switch between `all conditions` and `any condition`. Values in the same category are alternatives. In `all conditions` mode a row must match every selected category, so selecting a category hides rows with no value for it; in `any condition` mode a match in any selected category is enough. Value matching is exact and case-sensitive. Press `q` to return to the list with your selections kept; `Esc` quits `nbcon` instead of closing the menu.
+In the filter menu, categories are focused first: use `j`/`k` or arrow keys to move within the focused pane and `Tab` to switch between categories and values (`left`/`right` also switch categories). Press `Space` or `Enter` to toggle a value, `/` to search values (arrows move, `Space` toggles more, `Enter` toggles and returns to the values), and `a` to switch between `all conditions` and `any condition`, and `d` to remove all filters. Press `s` to save the current filters as a preset (uppercase `S` also works): type a name and press `Enter` to write it to the `filters` section of `config.yaml` (creating that section when missing; an existing name is replaced). Press `p` (`P` also works) to browse saved presets in a picker: use `j`/`k` or arrow keys to move, `1`–`9` or `Enter` to apply the highlighted preset and return to the list, `r` (`R` also works) to delete the highlighted preset from `config.yaml` (`y` confirms, `n` cancels), or `p` to go back to the filter menu without applying. Values in the same category are alternatives. In `all conditions` mode a row must match every selected category, so selecting a category hides rows with no value for it; in `any condition` mode a match in any selected category is enough. Value matching is exact and case-sensitive. Press `q` to return to the list with your selections kept; `Esc` quits `nbcon` instead of closing the menu.
 
 `nbcon <server>` pre-selects that server's filter value. The pre-selection lookup is case-insensitive: it uses the casing stored in the cache when that server already has cached services, and your typed text verbatim otherwise — matching is exact, so a differently-cased guess matches nothing.
+
+Filter presets live in `config.yaml` under `filters:` (see Configuration Reference). Each preset has a unique `name`, an optional `server` (or `servers` list), an optional `match` mode (`all` or `any`), and optional `tenants`, `sites`, and `roles` lists. Manually editing `config.yaml` works the same as saving from the selector. In explicit (`--target`/`--service`) mode, `--preset` only contributes its single server value for disambiguation when `--server` is omitted; tenant/site/role values are ignored there.
 
 Favorites (`m`) pin rows to a `Favorites` section at the top of the list. Every connection choice (via `Enter`, `1`–`9`, or `l`) is recorded in a most-recent-first `Recents` section holding the last 8 entries; `l` immediately connects to the newest one still present, and does nothing when there is none. Both are persisted in `${XDG_CACHE_HOME:-~/.cache}/nb-connect/launcher-state.json` (mode `0600`), which is independent of `--cache`/`NBCON_CACHE`. An unreadable or corrupt state file silently starts empty.
 
@@ -251,7 +278,7 @@ nbcon connect --target router-01 --service sshd
 nbcon connect --server production --target router-01 --service sshd
 ```
 
-Passing any of `--target`, `--service`, or `--endpoint` selects explicit mode, in which `--target` and `--service` must be used together. Both are matched case-insensitively against the cached entries: `--target` against the device name, or the virtual-machine name when the service has no device, and `--service` against the NetBox service name. `--server` takes precedence over the positional `[server]` argument; both filter case-insensitively before matching. When several cached entries match, the command fails and asks you to disambiguate with `--server` (or the positional argument).
+Passing any of `--target`, `--service`, or `--endpoint` selects explicit mode, in which `--target` and `--service` must be used together. Both are matched case-insensitively against the cached entries: `--target` against the device name, or the virtual-machine name when the service has no device, and `--service` against the NetBox service name. `--server` takes precedence over the positional `[server]` argument; both filter case-insensitively before matching. When neither is given, `--preset` supplies its single server value for disambiguation when the named preset has exactly one server. When several cached entries match, the command fails and asks you to disambiguate with `--server` (or the positional argument).
 
 `--endpoint` takes a `host:port` value that is used verbatim without checking it against the service's own endpoints. When it is omitted, the matched service must have exactly one endpoint; services with zero or with more than one endpoint fail with an error naming the count and asking for `--endpoint`.
 

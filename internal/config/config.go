@@ -18,6 +18,7 @@ type Config struct {
 	Cache    CacheConfig    `yaml:"cache"`
 	Ping     PingConfig     `yaml:"ping"`
 	Launcher LauncherConfig `yaml:"launcher"`
+	Filters  []FilterPreset `yaml:"filters"`
 }
 
 type NetBoxConfig struct {
@@ -60,10 +61,11 @@ type rawConfig struct {
 	Services ServicesConfig `yaml:"services"`
 	SSH      SSHConfig      `yaml:"ssh"`
 	Ping     PingConfig     `yaml:"ping"`
+	Filters  []FilterPreset `yaml:"filters"`
 	Launcher struct {
 		InfoPanelOpenByDefault *bool `yaml:"info_panel_open_by_default"`
 	} `yaml:"launcher"`
-	Cache    struct {
+	Cache struct {
 		TTL string `yaml:"ttl"`
 	} `yaml:"cache"`
 }
@@ -165,7 +167,12 @@ func Load(path string) (Config, error) {
 		}
 	}
 
-	return Config{NetBox: NetBoxConfig{Servers: servers}, Services: raw.Services, SSH: raw.SSH, Cache: CacheConfig{TTL: ttl}, Ping: PingConfig{Count: pingCount}, Launcher: LauncherConfig{InfoPanelOpenByDefault: launcherInfoPanelOpenByDefault}}, nil
+	filters, err := normalizeFilterPresets(raw.Filters)
+	if err != nil {
+		return Config{}, err
+	}
+
+	return Config{NetBox: NetBoxConfig{Servers: servers}, Services: raw.Services, SSH: raw.SSH, Cache: CacheConfig{TTL: ttl}, Ping: PingConfig{Count: pingCount}, Launcher: LauncherConfig{InfoPanelOpenByDefault: launcherInfoPanelOpenByDefault}, Filters: filters}, nil
 }
 
 // SSHFor returns the SSH configuration effective for the named NetBox server.

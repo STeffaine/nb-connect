@@ -27,6 +27,10 @@ func newServiceFilters() serviceFilters {
 	return serviceFilters{values: make(map[filterCategory]map[string]bool), matchAll: true}
 }
 
+func (filters *serviceFilters) clear() {
+	filters.values = make(map[filterCategory]map[string]bool)
+}
+
 func (filters *serviceFilters) toggle(category filterCategory, value string) {
 	if filters.values == nil {
 		filters.values = make(map[filterCategory]map[string]bool)
@@ -98,6 +102,17 @@ func filterValue(selection Selection, category filterCategory) string {
 }
 
 func (model model) updateFilterKey(message tea.KeyMsg) (model, tea.Cmd) {
+	if model.presetPicker {
+		return model.updatePresetPickerKey(message)
+	}
+	if model.savingPreset {
+		if message.String() == "enter" {
+			return model.savePresetFromInput()
+		}
+		var command tea.Cmd
+		model.presetNameInput, command = model.presetNameInput.Update(message)
+		return model, command
+	}
 	if model.filterSearching {
 		switch message.String() {
 		case "up":
@@ -114,6 +129,7 @@ func (model model) updateFilterKey(message tea.KeyMsg) (model, tea.Cmd) {
 			options := model.filterOptions()
 			if model.filterCursor < len(options) {
 				model.filters.toggle(filterCategories[model.filterCategory], options[model.filterCursor])
+				model.activePreset = ""
 			}
 			if message.String() == " " {
 				return model, nil
@@ -141,7 +157,27 @@ func (model model) updateFilterKey(message tea.KeyMsg) (model, tea.Cmd) {
 		return model, nil
 	case "a":
 		model.filters.matchAll = !model.filters.matchAll
+		model.activePreset = ""
 		return model, nil
+	case "d":
+		model.filters.clear()
+		model.activePreset = ""
+		return model, nil
+	case "S", "s":
+		if model.savePreset == nil {
+			model.presetNote = ""
+			model.presetError = "Saving presets is unavailable"
+			return model, nil
+		}
+		model.savingPreset = true
+		model.filterSearching = false
+		model.filterMenuSearch.Blur()
+		model.presetNameInput.SetValue("")
+		model.presetNote = ""
+		model.presetError = ""
+		return model, model.presetNameInput.Focus()
+	case "P", "p":
+		return model.openPresetPicker()
 	case "left", "shift+tab":
 		model.filterCategory = (model.filterCategory + len(filterCategories) - 1) % len(filterCategories)
 		model.filterMenuSearch.SetValue("")
@@ -167,6 +203,7 @@ func (model model) updateFilterKey(message tea.KeyMsg) (model, tea.Cmd) {
 		case " ", "enter":
 			if model.filterCursor < len(options) {
 				model.filters.toggle(filterCategories[model.filterCategory], options[model.filterCursor])
+				model.activePreset = ""
 			}
 		}
 		return model, nil
@@ -187,13 +224,20 @@ func (model model) updateFilterKey(message tea.KeyMsg) (model, tea.Cmd) {
 
 func (model model) filterSummary() string {
 	if len(model.filters.values) == 0 {
+		if model.activePreset != "" {
+			return "Preset: " + model.activePreset
+		}
 		return ""
 	}
 	mode := "all"
 	if !model.filters.matchAll {
 		mode = "any"
 	}
-	return "Filters (" + mode + "): " + strings.Join(model.selectedFilterValues(), ", ")
+	summary := "Filters (" + mode + "): " + strings.Join(model.selectedFilterValues(), ", ")
+	if model.activePreset != "" {
+		return "Preset " + model.activePreset + " | " + summary
+	}
+	return summary
 }
 
 func (model model) selectedFilterValues() []string {
