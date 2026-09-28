@@ -75,6 +75,66 @@ func TestSyncAggregatesMultipleNetBoxServers(t *testing.T) {
 	}
 }
 
+func TestSyncContinuesWhenOneServerFails(t *testing.T) {
+	good := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/status/":
+			writer.WriteHeader(http.StatusOK)
+		case "/api/ipam/services/":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"next":null,"results":[{"name":"sshd","protocol":"ssh","ports":[22],"ipaddresses":[{"address":"192.0.2.10/24"}],"device":{"name":"good-router"}}]}`))
+		default:
+			t.Errorf("unexpected request path %q", request.URL.Path)
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer good.Close()
+	bad := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/status/":
+			writer.WriteHeader(http.StatusInternalServerError)
+		case "/api/ipam/services/":
+			writer.WriteHeader(http.StatusInternalServerError)
+		default:
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer bad.Close()
+
+	credentials := config.Credentials{}
+	credentials.NetBox.Servers = map[string]config.NetBoxServerCredentials{
+		"bad":  {Token: "bad-token"},
+		"good": {Token: "good-token"},
+	}
+	configuration := config.Config{NetBox: config.NetBoxConfig{Servers: []config.NetBoxServer{{Name: "bad", URL: bad.URL}, {Name: "good", URL: good.URL}}}, Services: config.ServicesConfig{Enabled: []string{"sshd"}}}
+	cachePath := filepath.Join(t.TempDir(), "services.json")
+	command := newRootCommand(dependencies{
+		loadConfig:      func(string) (config.Config, error) { return configuration, nil },
+		loadCredentials: func(string) (config.Credentials, error) { return credentials, nil },
+		defaultConfig:   func() (string, error) { return "config.yaml", nil },
+		defaultCache:    func() (string, error) { return cachePath, nil },
+		newClient:       func(url, token string) (*netbox.Client, error) { return netbox.NewClient(url, token, nil) },
+		now:             time.Now,
+	})
+	command.SetOut(&bytes.Buffer{})
+	command.SetArgs([]string{"sync"})
+	err := command.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("expected error for failing server, got nil")
+	}
+	if !strings.Contains(err.Error(), "bad") {
+		t.Fatalf("error %q does not mention failing server", err)
+	}
+
+	snapshot, readErr := (cache.Store{Path: cachePath}).Read()
+	if readErr != nil {
+		t.Fatalf("cache was not written despite partial success: %v", readErr)
+	}
+	if len(snapshot.Services) != 1 || snapshot.Services[0].Server != "good" {
+		t.Fatalf("cached services = %#v, want 1 service from good server", snapshot.Services)
+	}
+}
+
 func TestSyncSingleServerPreservesOtherCachedServices(t *testing.T) {
 	newServer := func(target string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

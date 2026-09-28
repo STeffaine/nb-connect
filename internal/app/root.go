@@ -116,29 +116,51 @@ func newRootCommand(deps dependencies) *cobra.Command {
 			}
 		}
 		var services []netbox.Service
+		var syncErrs []error
+		succeeded := 0
 		for _, server := range serversToSync {
 			token, err := credentials.TokenFor(server.Name)
 			if err != nil {
-				return nil, err
+				if serverFilter != "" {
+					return nil, err
+				}
+				syncErrs = append(syncErrs, err)
+				continue
 			}
 			client, err := deps.newClient(server.URL, token)
 			if err != nil {
-				return nil, err
+				if serverFilter != "" {
+					return nil, err
+				}
+				syncErrs = append(syncErrs, fmt.Errorf("connect to NetBox server %q: %w", server.Name, err))
+				continue
 			}
 			if debugOutput != nil {
 				client.SetDebugOutput(debugOutput)
 			}
 			if err := client.Validate(ctx); err != nil {
-				return nil, fmt.Errorf("validate NetBox server %q: %w", server.Name, err)
+				if serverFilter != "" {
+					return nil, fmt.Errorf("validate NetBox server %q: %w", server.Name, err)
+				}
+				syncErrs = append(syncErrs, fmt.Errorf("validate NetBox server %q: %w", server.Name, err))
+				continue
 			}
 			serverServices, err := client.Services(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("query NetBox server %q: %w", server.Name, err)
+				if serverFilter != "" {
+					return nil, fmt.Errorf("query NetBox server %q: %w", server.Name, err)
+				}
+				syncErrs = append(syncErrs, fmt.Errorf("query NetBox server %q: %w", server.Name, err))
+				continue
 			}
 			for index := range serverServices {
 				serverServices[index].Server = server.Name
 			}
 			services = append(services, serverServices...)
+			succeeded++
+		}
+		if len(syncErrs) > 0 && succeeded == 0 {
+			return nil, errors.Join(syncErrs...)
 		}
 		services = filterServices(services, configuration.Services.Enabled)
 		// When syncing a single server, keep other servers' cached services intact.
@@ -154,6 +176,9 @@ func newRootCommand(deps dependencies) *cobra.Command {
 		if err := (cache.Store{Path: serviceCachePath}).Write(services, deps.now()); err != nil {
 			return nil, err
 		}
+		if len(syncErrs) > 0 {
+			return services, errors.Join(syncErrs...)
+		}
 		return services, nil
 	}
 
@@ -164,6 +189,15 @@ func newRootCommand(deps dependencies) *cobra.Command {
 		}
 		services, err := refreshServices(command.Context(), debugOutput, serverFilter)
 		if err != nil {
+			if len(services) == 0 {
+				return err
+			}
+			fmt.Fprintln(command.OutOrStdout(), "Connected to NetBox (partial)")
+			if serverFilter != "" {
+				services = filterServicesByServer(services, serverFilter)
+			}
+			fmt.Fprintf(command.OutOrStdout(), "Found %d services\nCache updated\n", len(services))
+			fmt.Fprintf(command.ErrOrStderr(), "warning: %v\n", err)
 			return err
 		}
 		fmt.Fprintln(command.OutOrStdout(), "Connected to NetBox")
