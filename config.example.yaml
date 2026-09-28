@@ -1,43 +1,64 @@
 # Public nb-connect configuration.
-# Copy this file to ~/.config/nb-connect/config.yaml.
+# Copy this file to ~/.config/nb-connect/config.yaml and edit the values:
+#   mkdir -p ~/.config/nb-connect
+#   install -m 0644 config.example.yaml ~/.config/nb-connect/config.yaml
+# Override the path with --config or NBCON_CONFIG.
 
 netbox:
-  # Add one or more named NetBox servers. Do not include /api/ in URLs.
+  # At least one server is required. Do not include /api/ in URLs.
   servers:
     - name: production
+      # Must start with http:// or https://. Trailing slashes are removed.
       url: https://netbox.example.com
       # Optional per-server SSH settings. When present, this block fully
-      # replaces the global ssh block below for this server only.
+      # replaces the global ssh block below for this server only (no merging):
+      # a server ssh block without default_user has no SSH user at all.
       # ssh:
       #   default_user: prod-admin
       #   keys:
       #     prod-admin:
       #       identity_file: ~/.ssh/id_prod_admin
+    # Additional servers each need a matching token in credentials.yaml.
+    # - name: lab
+    #   url: https://netbox-lab.example.com
+    #   # No ssh block: uses the global ssh settings below.
 
 services:
   # Only these NetBox service names are cached and shown by nbcon.
-  # Service matching ignores case and surrounding whitespace.
+  # Matching ignores case and surrounding whitespace. An empty list caches nothing.
+  # Only ssh and sshd (via ssh) and telnet (via telnet) can be connected;
+  # other names appear in the cache and selector but fail to connect.
   enabled:
+    - ssh
     - sshd
     # - telnet
 
 ssh:
   # Global SSH settings, used by every NetBox server without its own ssh block.
-  # Used by the SSH connector for matching NetBox SSH services.
+  # default_user is used verbatim as the SSH login name. It is practically
+  # required for SSH connections: an empty user fails every SSH connection
+  # with a "no SSH user configured" error.
   default_user: admin
   keys:
+    # The entry whose key exactly equals default_user (case-sensitive)
+    # supplies the identity file; other entries are ignored.
     admin:
-      # Optional. Use an absolute path or ~/... for this user's private key.
+      # Optional. Passed to ssh -i; omitted when empty.
+      # Only ~ and ~/... are expanded to the home directory.
       identity_file: ~/.ssh/id_admin
 
 cache:
-  # Go duration syntax; for example: 15m, 1h, or 24h.
+  # Go duration syntax; for example: 30s, 15m, 1h. Default: 15m.
+  # Parsed and validated, but cached data never expires automatically:
+  # the cache only changes on sync, connect --refresh, or the selector's s key.
   ttl: 15m
 
 ping:
   # Number of ICMP echo requests sent by the TUI ping action.
+  # Unset or 0 selects the default of 4; negative values are rejected.
   count: 4
 
 launcher:
   # Open the info panel by default when the screen is wide enough.
+  # Default: true. Press i in the selector to toggle it.
   info_panel_open_by_default: true
