@@ -3,9 +3,12 @@ package launcher
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/steffaine/nb-connect/internal/netbox"
 )
 
 func (model model) recordSelection(selection Selection) model {
@@ -35,6 +38,30 @@ func (model model) recordSelection(selection Selection) model {
 	model.recents = filtered
 	_ = saveLauncherState(model.statePath, model.favorites, model.recents)
 	return model
+}
+
+// LastSelection returns the most recently connected service still present in services,
+// optionally restricted to serverFilter.
+func LastSelection(services []netbox.Service, serverFilter string) (Selection, error) {
+	_, recents, err := loadLauncherState(defaultLauncherStatePath())
+	if err != nil {
+		return Selection{}, fmt.Errorf("read launcher state: %w", err)
+	}
+	serverFilter = strings.TrimSpace(serverFilter)
+	for _, key := range recents {
+		for _, service := range services {
+			if serverFilter != "" && !strings.EqualFold(service.Server, serverFilter) {
+				continue
+			}
+			for _, endpoint := range service.Endpoints() {
+				selection := Selection{Service: service, Endpoint: endpoint}
+				if selectionKey(selection) == key {
+					return selection, nil
+				}
+			}
+		}
+	}
+	return Selection{}, errors.New("no previous connection found")
 }
 
 func (model model) toggleFavorite(selection Selection) model {

@@ -51,6 +51,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 	var presetName string
 	var refresh bool
 	var dryRun bool
+	var last bool
 
 	root := &cobra.Command{Use: "nbcon [server]", Short: "Launch services discovered from NetBox", Args: cobra.MaximumNArgs(1), SilenceUsage: true}
 	root.PersistentFlags().StringVar(&configPath, "config", "", "path to public configuration")
@@ -248,6 +249,9 @@ func newRootCommand(deps dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if last && (target != "" || serviceName != "" || endpoint != "" || presetName != "") {
+				return fmt.Errorf("--last cannot be combined with --target, --service, --endpoint, or --preset")
+			}
 
 			savePreset := func(preset config.FilterPreset) error {
 				return config.SaveFilterPreset(configurationPath, preset)
@@ -255,9 +259,14 @@ func newRootCommand(deps dependencies) *cobra.Command {
 			deletePreset := func(name string) error {
 				return config.DeleteFilterPreset(configurationPath, name)
 			}
-			selection, err := selectServiceWithPreset(command.Context(), snapshot.Services, serverFilter, presetName, target, serviceName, endpoint, configuration.Ping.Count, configuration.Launcher.InfoPanelOpenByDefault, configuration.Filters, savePreset, deletePreset, func(ctx context.Context) ([]netbox.Service, error) {
-				return refreshServices(ctx, nil, "")
-			})
+			var selection launcher.Selection
+			if last {
+				selection, err = launcher.LastSelection(snapshot.Services, serverFilter)
+			} else {
+				selection, err = selectServiceWithPreset(command.Context(), snapshot.Services, serverFilter, presetName, target, serviceName, endpoint, configuration.Ping.Count, configuration.Launcher.InfoPanelOpenByDefault, configuration.Filters, savePreset, deletePreset, func(ctx context.Context) ([]netbox.Service, error) {
+					return refreshServices(ctx, nil, "")
+				})
+			}
 			if err != nil {
 				return ignoreSelectionCancellation(err)
 			}
@@ -282,6 +291,7 @@ func newRootCommand(deps dependencies) *cobra.Command {
 	connectCommand.Flags().StringVar(&target, "target", "", "target device or virtual machine name")
 	connectCommand.Flags().StringVar(&serviceName, "service", "", "NetBox service name")
 	connectCommand.Flags().StringVar(&endpoint, "endpoint", "", "endpoint in host:port form")
+	connectCommand.Flags().BoolVarP(&last, "last", "l", false, "connect to the most recent connection without opening the launcher")
 	connectCommand.Flags().BoolVar(&refresh, "refresh", false, "synchronize from NetBox before connecting")
 	connectCommand.Flags().BoolVar(&dryRun, "dry-run", false, "print the SSH command without executing it")
 	connectCommand.Flags().BoolVar(&connectDebugAPI, "debug-api", false, "print NetBox API requests and response bodies when used with --refresh")
